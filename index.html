@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#171613">
+  <meta name="description" content="本地 STL 打印工作台。配置模块、组合布局，追踪每一个零件的打印进度。">
+  <link rel="icon" href="data:,">
+  <title>VAULT PRINT STUDIO · 本地打印工作台</title>
+  <link rel="stylesheet" href="./src/styles.css">
+  <script type="module" src="./src/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳至工作台</a>
+  <header id="app-header" class="app-header">
+    <a class="brand" href="./" aria-label="VAULT PRINT STUDIO 首页">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="brand-name">VAULT <span>PRINT STUDIO</span></span>
+    </a>
+    <span class="independent-label"><span class="status-dot"></span>独立工具 <span class="label-divider">/</span> LOCAL STL</span>
+    <div class="header-actions" aria-label="工作台工具">
+      <button id="open-models" class="btn btn-quiet" type="button"><span aria-hidden="true">↥</span> <span>模型管理</span></button>
+      <button id="sound-toggle" class="btn btn-icon" type="button" aria-label="开启操作音效" aria-pressed="false" title="音效已关闭">♪<span class="sound-slash" aria-hidden="true"></span></button>
+      <label class="btn btn-quiet restore-label" for="restore-project" title="从 JSON 文件恢复工作台进度"><span aria-hidden="true">↶</span> 恢复进度<input id="restore-project" class="visually-hidden" type="file" accept=".json"></label>
+      <button id="export-project" class="btn btn-outline" type="button" title="导出配置与打印进度，不包含 STL 文件">保存 / 导出 <span aria-hidden="true">↗</span></button>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <section id="gate" class="gate" aria-labelledby="gate-title">
+      <div class="gate-copy">
+        <p class="eyebrow"><span class="orange-rule"></span> YOUR LOCAL PRINT WORKSPACE</p>
+        <h1 id="gate-title">你的模型，<br>你的打印<span class="accent">工作台</span><span class="title-period">.</span></h1>
+        <p class="gate-description">导入你拥有的 STL，从一枚零件到整套组合。<br>配置、预览、打印进度，在一处完成。</p>
+        <div class="gate-actions">
+          <button id="choose-folder" class="btn btn-primary btn-large" type="button">选择模型文件夹 <span aria-hidden="true">↗</span></button>
+          <button id="choose-files" class="btn btn-text" type="button">或选择 STL 文件 <span aria-hidden="true">＋</span></button>
+        </div>
+        <input id="folder-input" class="visually-hidden" type="file" webkitdirectory multiple accept=".stl" tabindex="-1" aria-label="选择 STL 模型文件夹">
+        <input id="files-input" class="visually-hidden" type="file" multiple accept=".stl" tabindex="-1" aria-label="选择 STL 模型文件">
+        <div id="import-feedback" class="import-feedback">
+          <p id="import-status" class="import-status" role="status" aria-live="polite">支持中英文文件名；导入后核对缺失项与匹配冲突。</p>
+          <progress id="import-progress" max="100" value="0" aria-label="模型导入进度"></progress>
+        </div>
+        <p class="local-promise"><span class="status-dot" aria-hidden="true"></span>本地文件留在你的设备上</p>
+      </div>
+      <div class="gate-art" aria-hidden="true">
+        <div class="art-corner corner-tl"></div><div class="art-corner corner-tr"></div><div class="art-corner corner-bl"></div><div class="art-corner corner-br"></div>
+        <span class="art-coordinate">LOCAL / OBJECT SPACE</span>
+        <div class="cube-orbit"><div class="abstract-cube"><span class="cube-face cube-front"></span><span class="cube-face cube-back"></span><span class="cube-face cube-right"></span><span class="cube-face cube-left"></span><span class="cube-face cube-top"></span><span class="cube-face cube-bottom"></span><span class="cube-core"></span></div></div>
+        <div class="art-baseline"><span>X — Y — Z</span><span>READY WHEN YOU ARE <b>↗</b></span></div>
+      </div>
+      <footer class="gate-footer"><p>本工具不提供模型文件，与原设计方无隶属关系。</p><a href="https://www.ussadesign.com/products/vault" target="_blank" rel="noopener noreferrer">前往 USSA Design 官方购买 <span aria-hidden="true">↗</span></a></footer>
+    </section>
+
+    <div id="workspace" class="workspace" hidden>
+      <div class="workspace-nav">
+        <nav class="tabs" aria-label="工作区">
+          <button class="tab is-active" data-tab="config" type="button" aria-current="page" aria-controls="tab-config"><span class="tab-index">01</span> 配置</button>
+          <button class="tab" data-tab="combine" type="button" aria-controls="tab-combine"><span class="tab-index">02</span> 组合</button>
+          <button class="tab" data-tab="library" type="button" aria-controls="tab-library"><span class="tab-index">03</span> 零件库</button>
+        </nav>
+        <div class="current-progress"><span id="current-module">尚未选择模块</span><progress id="module-progress" value="0" max="100" aria-label="当前模块打印进度"></progress></div>
+      </div>
+
+      <section id="tab-config" class="tab-panel" aria-label="模块配置">
+        <div class="module-bar">
+          <div class="module-picker"><label class="eyebrow" for="module-switch">MODULE / 模块</label><select id="module-switch" aria-label="切换模块"><option value="">选择模块</option></select><button id="module-new" class="btn btn-icon" type="button" title="新建模块" aria-label="新建模块">＋</button></div>
+          <span class="workspace-hint">配置一个模块，完成每一枚零件。</span>
+        </div>
+        <div class="workbench">
+          <div class="stage-area">
+            <div id="stage-wrap" class="stage-wrap">
+              <div class="stage-toolbar" aria-label="模型视图工具">
+                <div class="segmented" aria-label="模型视图">
+                  <button class="is-active" data-view="assembled" aria-pressed="true" type="button">装配</button>
+                  <button data-view="exploded" aria-pressed="false" type="button">爆炸</button>
+                  <button data-view="flat" aria-pressed="false" type="button">平铺</button>
+                </div>
+                <div class="stage-tools"><button id="open-toggle" class="btn btn-quiet" type="button" aria-pressed="false" title="打开或合上模块">开合</button><button id="color-tool" class="btn btn-icon" type="button" aria-label="选择模型颜色" aria-controls="color-palette" aria-expanded="false" title="模型配色"><span class="color-icon" aria-hidden="true"></span></button><button id="stage-reset" class="btn btn-icon" type="button" aria-label="重置视角" title="重置视角">↺</button></div>
+              </div>
+              <canvas id="stage" tabindex="0" aria-label="交互式模块三维预览；可使用视图按钮与装配步进控制">你的浏览器不支持 Canvas。仍可通过打印清单管理零件。</canvas>
+              <div class="stage-caption"><span id="stage-status" role="status" aria-live="polite">选择配置以查看模型</span><span class="stage-axis" aria-hidden="true">X <i></i> Y <i></i> Z</span></div>
+              <div id="color-palette" class="color-palette" hidden aria-label="模型颜色"><div class="swatches" id="color-swatches"></div><label class="custom-color-label" for="custom-color">自定义颜色<input id="custom-color" type="color" value="#ff6b2b"></label></div>
+              <section id="model-popover" class="model-popover" hidden aria-labelledby="selected-name">
+                <div class="popover-heading"><p class="eyebrow">SELECTED PART / 已选零件</p><button id="selected-close" class="btn btn-icon" type="button" aria-label="关闭零件详情">×</button></div>
+                <h3 id="selected-name">尚未选择零件</h3><p id="selected-subtitle" class="muted"></p>
+                <div class="selected-quantity"><span>所需数量</span><strong id="selected-qty">—</strong></div>
+                <div id="selected-options" class="selected-options"></div>
+                <div class="popover-actions"><button id="selected-download" class="btn btn-primary" type="button">下载 STL <span aria-hidden="true">↓</span></button><button id="selected-print" class="btn btn-outline" type="button">标记已打印 <span aria-hidden="true">✓</span></button><button id="selected-undo" class="btn btn-text" type="button">撤销打印标记</button></div>
+              </section>
+            </div>
+            <div class="assembly-controls" aria-label="装配步骤控制">
+              <div class="step-buttons"><button id="step-prev" class="btn btn-icon" type="button" aria-label="上一步" title="上一步">‹</button><button id="step-play" class="btn btn-icon" type="button" aria-label="播放装配步骤" aria-pressed="false" title="播放 / 暂停">▶</button><button id="step-next" class="btn btn-icon" type="button" aria-label="下一步" title="下一步">›</button></div>
+              <div class="step-track"><label id="step-label" for="step-range">装配步骤 · 等待模型</label><input id="step-range" type="range" min="0" max="1" value="0" step="1" aria-label="装配步骤"></div>
+              <div class="explode-control"><label for="explode-range">展开 <output id="explode-label" for="explode-range">0%</output></label><input id="explode-range" type="range" min="0" max="100" value="0" aria-label="爆炸展开程度"></div>
+            </div>
+          </div>
+
+          <aside class="config-panel" aria-labelledby="config-heading">
+            <div class="panel-heading"><h2 id="config-heading">模块配置</h2><span class="eyebrow">SPECIFICATION</span></div>
+            <form id="config-form" autocomplete="off">
+              <label class="field" for="module-name"><span>模块名称</span><input id="module-name" name="name" placeholder="为模块命名" maxlength="100"></label>
+              <label class="field" for="kind"><span>模块类型</span><select id="kind" name="kind"><option value="drawer">抽屉 · Drawer</option><option value="sustainer">提箱 · Sustainer</option><option value="mods">扩展件 · Mods</option></select></label>
+              <div id="config-fields" class="config-fields"></div>
+            </form>
+            <div id="module-summary" class="module-summary" aria-live="polite"></div>
+            <div id="missing-notice" class="missing-notice" role="status" aria-live="polite" hidden></div>
+            <section class="hardware-section" aria-labelledby="hardware-heading"><h3 id="hardware-heading">装配五金 <span class="eyebrow">HARDWARE</span></h3><ul id="hardware-list" class="hardware-list"></ul></section>
+          </aside>
+
+          <section class="print-area" aria-labelledby="print-heading">
+            <div class="print-header"><div class="print-title"><h2 id="print-heading">打印清单</h2><span id="print-summary" class="muted" aria-live="polite">等待配置</span></div><div class="list-controls"><label class="search-field"><span class="visually-hidden">搜索打印零件</span><input id="print-search" type="search" placeholder="查找零件" autocomplete="off"></label><label><span class="visually-hidden">筛选打印状态</span><select id="print-filter"><option value="all">全部状态</option><option value="pending">待打印</option><option value="done">已打印</option></select></label></div></div>
+            <div id="print-list" class="print-list" aria-label="当前模块打印零件"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-combine" class="tab-panel combine-panel" hidden aria-label="组合布局">
+        <div class="section-heading"><div><p class="eyebrow">COMPOSE YOUR SETUP</p><h1>组合工作台<span class="accent">.</span></h1></div><div class="plan-actions"><label class="visually-hidden" for="plan-select">选择组合方案</label><select id="plan-select"><option value="">选择方案</option></select><button id="plan-new" class="btn btn-primary" type="button">新建方案 ＋</button><button id="plan-duplicate" class="btn btn-outline" type="button">复制</button><button id="plan-remove" class="btn btn-quiet danger" type="button">删除</button></div></div>
+        <div class="plan-layout"><div class="plan-stage"><div class="plan-stage-heading"><label class="field-inline" for="plan-name"><span>方案名称</span><input id="plan-name" placeholder="为组合命名" maxlength="100"></label><span class="eyebrow">ASSEMBLY VIEW</span></div><canvas id="plan-canvas" tabindex="0" aria-label="组合方案三维预览"></canvas><div id="plan-validation" class="plan-validation" role="status" aria-live="polite"></div></div><aside class="plan-sidebar"><h2>放置模块</h2><p class="muted">选择模块，再选择布局位置。</p><div id="plan-palette" class="plan-palette"></div><h3>布局</h3><div id="plan-grid" class="plan-grid" aria-label="组合位置"></div><h3>组合中的模块</h3><div id="plan-units" class="plan-units"></div></aside></div>
+      </section>
+
+      <section id="tab-library" class="tab-panel library-panel" hidden aria-label="本地零件库">
+        <div class="section-heading"><div><p class="eyebrow">YOUR LOCAL COLLECTION</p><h1>零件库<span class="accent">.</span></h1></div><span id="library-count" class="library-count" aria-live="polite">尚无模型</span></div>
+        <div class="library-filters"><label class="search-field"><span class="visually-hidden">搜索零件库</span><input id="library-search" type="search" placeholder="搜索零件名称、中英文文件名…" autocomplete="off"></label><label class="field-inline" for="library-category"><span>类别</span><select id="library-category"><option value="all">全部类别</option></select></label><label class="field-inline" for="library-scope"><span>范围</span><select id="library-scope"><option value="all">全部零件</option><option value="current">当前模块</option><option value="missing">缺失文件</option></select></label></div>
+        <div id="library-list" class="library-list" aria-label="本地模型"></div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="models-dialog" class="models-dialog" aria-labelledby="models-title">
+    <div class="dialog-heading"><div><p class="eyebrow">LOCAL FILES / 本地文件</p><h2 id="models-title">模型管理<span class="accent">.</span></h2></div><button id="models-close" class="btn btn-icon" type="button" aria-label="关闭模型管理">×</button></div>
+    <div class="dialog-body"><div class="import-toolbar"><p id="import-summary" role="status" aria-live="polite">尚未导入模型</p><button class="btn btn-outline" data-action="import-folder" type="button">选择文件夹 ↥</button></div><div id="dialog-import-feedback"></div><p class="dialog-help">按 STL 文件指纹匹配，支持中英文及改名目录。不同版本会列为待确认，文件不会上传。</p><label class="search-field"><span class="visually-hidden">搜索文件匹配结果</span><input id="match-search" type="search" placeholder="搜索零件名称或文件名" autocomplete="off"></label><div id="match-list" class="match-list" aria-label="模型匹配结果"></div></div>
+    <div class="dialog-footer"><button id="clear-models" class="btn btn-quiet danger" type="button">清除已导入模型</button><button id="confirm-import" class="btn btn-primary" type="button">进入工作台 <span aria-hidden="true">→</span></button></div>
+  </dialog>
+
+  <dialog id="part-dialog" class="part-dialog" aria-labelledby="part-title"><div class="dialog-heading"><div><p class="eyebrow">PART INSPECTION</p><h2 id="part-title">零件预览</h2></div><button id="part-close" class="btn btn-icon" type="button" aria-label="关闭零件预览">×</button></div><canvas id="part-canvas" tabindex="0" aria-label="单个零件三维预览"></canvas><div class="dialog-footer"><p class="muted">确认零件后，再下载到切片软件。</p><button id="part-download" class="btn btn-primary" type="button">下载 STL ↓</button></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <noscript><div class="noscript-notice">请启用 JavaScript 以在本地导入和预览 STL 文件。</div></noscript>
+</body>
+</html>
