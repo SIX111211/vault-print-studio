@@ -27,3 +27,4 @@ private/
 local-models/
 test-results/
 playwright-report/
+.playwright-cli/

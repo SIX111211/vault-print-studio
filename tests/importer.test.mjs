@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { scanFiles, MAX_FILE_BYTES, SAMPLE_BYTES } from '../src/importer.js';
+import { scanFiles, contentSignature, MAX_FILE_BYTES, SAMPLE_BYTES } from '../src/importer.js';
+import { analyzeSTLGeometry } from '../src/geometry-signature.js';
 
 function binary({ triangles = 1, shift = 0, solidHeader = false, badFloat = false } = {}) {
   const bytes = new Uint8Array(84 + triangles * 50);
@@ -242,4 +243,123 @@ test('abort and caller callback errors propagate, duplicate catalog IDs reject',
   const r = record(binary());
   await assert.rejects(scanFiles([], [r, r]), /unique/);
   await assert.rejects(scanFiles([], [], { maxFileBytes: -1 }), /maxFileBytes/);
+});
+
+async function geometryRecord(bytes, extra = {}) {
+  const geometry = await analyzeSTLGeometry(file(bytes));
+  return record(bytes, {geometrySignature:geometry.signature, geometryArea:geometry.surfaceArea,
+    bbox:geometry.bbox, triangles:geometry.triangles, ...extra});
+}
+
+test('re-exported English/Chinese/arbitrary names match complete geometry, ignoring header, normals and attributes', async () => {
+  const base=binary(), catalog=[await geometryRecord(base)];
+  const changed=base.slice(); changed.set(new TextEncoder().encode('exported by another tool'));
+  const view=new DataView(changed.buffer);view.setFloat32(84,NaN,true);view.setUint16(132,255,true);
+  for(const name of ['Original English.stl','中文版.stl','opaque123.STL']){
+    const result=await scanFiles([file(changed,name)],catalog);
+    assert.equal(result.matches.get('part').method,'geometry');
+    assert.equal(result.matches.get('part').validation.scope,'complete');
+    assert.deepEqual(result.missing,[]);
+  }
+});
+
+test('ASCII export with changed labels, case and normals matches a binary catalogue without any name hint', async () => {
+  const base=binary(), catalog=[await geometryRecord(base)];
+  const source=new TextDecoder().decode(ascii()).toUpperCase().replace('NORMAL 0 0 1','NORMAL NaN 0 0');
+  const result=await scanFiles([file(new TextEncoder().encode(source),'unrelated.STL')],catalog);
+  assert.equal(result.matches.get('part').method,'geometry');
+  assert.equal(result.matches.get('part').validation.format,'ascii');
+});
+
+test('same count and complete bounds with different surface is a version candidate, never automatic', async () => {
+  const base=binary({triangles:2}), catalog=[await geometryRecord(base)];
+  const changed=base.slice();new DataView(changed.buffer).setFloat32(84+24,.5,true);
+  const result=await scanFiles([file(changed,'random-new-version.stl')],catalog);
+  assert.equal(result.matches.size,0);
+  assert.equal(result.conflicts[0].reason,'geometry-version');
+  assert.equal(result.conflicts[0].candidates[0].boundsMatch,true);
+  assert.equal(result.conflicts[0].candidates[0].trianglesMatch,true);
+  assert.deepEqual(result.missing,['part']);
+});
+
+test('geometry aliases and mixed-format duplicate files remain one imported identity', async () => {
+  const base=binary();const one=await geometryRecord(base),two={...one,id:'other',name:'Another.stl'};
+  for(const inputs of [[file(ascii(),'converted.stl'),file(base,'original.stl')],[file(base,'original.stl'),file(ascii(),'converted.stl')]]){
+    const result=await scanFiles(inputs,[one,two]);
+    assert.equal(result.matches.size,2);assert.equal(result.duplicates.length,1);
+    assert.equal(result.duplicates[0].reason,'same-geometry');
+    assert.equal(result.matches.get('part').file,inputs[0]);
+    assert.deepEqual(result.matches.get('other').duplicateFiles,[inputs[1]]);
+  }
+});
+
+test('AppleDouble is identified by its content; real STL in similarly named folders still imports', async () => {
+  const apple=new Uint8Array(212);apple.set([0,5,22,7]);
+  const result=await scanFiles([file(apple,'._Part.stl','__MACOSX/._Part.stl')],[record(binary())]);
+  assert.equal(result.invalid.length,0);assert.equal(result.diagnostics.metadataCount,1);
+  assert.equal(result.diagnostics.stlCount,0);assert.equal(result.diagnostics.emptyReason,'macos-metadata');
+  const real=await scanFiles([file(binary(),'._real.stl','__MACOSX/._real.stl')],[record(binary())]);
+  assert.equal(real.matches.size,1);assert.equal(real.diagnostics.stlCount,1);
+});
+
+test('manual-only and archive-only folders report why they cannot provide models', async () => {
+  const pdf=await scanFiles([file(new Uint8Array([1]),'manual.pdf')],[]);
+  assert.equal(pdf.diagnostics.emptyReason,'no-stl');
+  const zip=await scanFiles([file(new Uint8Array([1]),'original.zip')],[]);
+  assert.equal(zip.diagnostics.emptyReason,'archive-only');
+});
+
+test('full-content analysis progress is reported and callback failures propagate', async () => {
+  const base=binary(), catalog=[await geometryRecord(base)];
+  const changed=base.slice();changed[0]=42;
+  const events=[];
+  await scanFiles([file(changed)],catalog,{onProgress:p=>events.push(p)});
+  assert.ok(events.some(p=>p.status==='geometry'&&p.fileProgress===1));
+  await assert.rejects(scanFiles([file(changed)],catalog,{onProgress:p=>{if(p.status==='geometry')throw Error('stop progress');}}),/stop progress/);
+});
+
+test('changed middle facets cannot hide behind matching head/tail bytes and file length', async () => {
+  const base=binary({triangles:4000}), changed=base.slice();
+  new DataView(changed.buffer).setFloat32(84+2000*50+24,.5,true);
+  assert.equal(fingerprint(base),fingerprint(changed),'fixture must retain old sampled signature');
+  const reference=await geometryRecord(base,{contentSignature:await contentSignature(file(base))});
+  assert.notEqual(await contentSignature(file(changed)),reference.contentSignature);
+  const result=await scanFiles([file(changed,'same-name.stl')],[reference]);
+  assert.equal(result.matches.size,0);assert.equal(result.conflicts[0].reason,'geometry-version');
+  const known=await scanFiles([file(base,'original English.stl')],[reference]);
+  assert.equal(known.matches.get('part').method,'content');
+});
+
+test('full-content fast path expands only equivalent geometry aliases across export formats', async () => {
+  const base=binary(), text=ascii();
+  const one=await geometryRecord(base,{contentSignature:await contentSignature(file(base))});
+  const two=await geometryRecord(text,{id:'other',contentSignature:await contentSignature(file(text))});
+  const result=await scanFiles([file(base),file(text,'other.stl')],[one,two]);
+  assert.equal(result.matches.size,2);assert.deepEqual(result.missing,[]);
+  assert.equal(result.duplicates.length,1);
+});
+
+test('registered paired export matches by content, preserves quantity metadata and prefers baseline',async()=>{
+  const bytes=binary(),other=binary({triangles:2,shift:5}),base=await geometryRecord(bytes,{contentSignature:await contentSignature(file(bytes))}),v=await geometryRecord(other,{contentSignature:await contentSignature(file(other))});
+  base.variants=[{...v,piecesPerFile:2,referencePiecesPerFile:1}];
+  const alternate=file(other,'完全改名.STL');let result=await scanFiles([alternate],[base]);
+  assert.equal(result.matches.get('part').variant.piecesPerFile,2);assert.equal(result.matches.get('part').file,alternate);
+  const original=file(bytes,'original.stl');
+  for(const inputs of [[alternate,original],[original,alternate]]){result=await scanFiles(inputs,[base]);assert.equal(result.matches.get('part').file,original);assert.equal(result.matches.get('part').variant,null);}
+  const reexport=other.slice();reexport[0]=33;result=await scanFiles([file(reexport,'different-header.stl')],[base]);
+  assert.equal(result.matches.get('part').method,'geometry');assert.equal(result.matches.get('part').variant.piecesPerFile,2);
+});
+
+test('known complete content accepts ignored nonfinite normals and unknown content-only catalogues still inspect every facet',async()=>{
+ const bytes=binary();new DataView(bytes.buffer).setFloat32(84,NaN,true);
+ const known=await geometryRecord(bytes,{contentSignature:await contentSignature(file(bytes))});
+ const result=await scanFiles([file(bytes)],[known]);assert.equal(result.matches.size,1);assert.equal(result.invalid.length,0);
+ const large=binary({triangles:5000});new DataView(large.buffer).setFloat32(84+2345*50+12,Infinity,true);
+ const reference=record(binary(),{contentSignature:await contentSignature(file(binary()))});
+ const unknown=await scanFiles([file(large,'unknown.stl')],[reference]);assert.equal(unknown.invalid.length,1);assert.equal(unknown.matches.size,0);
+});
+
+test('registered but uncertain composite version remains an explicit candidate after renaming or re-export',async()=>{
+ const bytes=binary(),different=binary({shift:15,triangles:3}),base=await geometryRecord(bytes,{contentSignature:await contentSignature(file(bytes))}),v=await geometryRecord(different,{contentSignature:await contentSignature(file(different))});base.variants=[{...v,requiresConfirmation:true}];
+ for(const header of [0,33]){const altered=different.slice();altered[0]=header;const result=await scanFiles([file(altered,'anything.stl')],[base]);assert.equal(result.matches.size,0);assert.equal(result.conflicts.length,1);assert.deepEqual(result.conflicts[0].candidateIds,['part']);}
 });

@@ -11,7 +11,7 @@ const ROOT_DIRS = new Set(['.github', 'scripts', 'src', 'tests']);
 const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.json', '.html', '.css', '.md', '.yml', '.yaml']);
 const ASSET_EXTENSIONS = new Set(('.stl .obj .3mf .ply .off .dae .fbx .blend .step .stp .iges .igs .gcode .glb .gltf .bin .wasm .pdf .png .jpg .jpeg .webp .gif .avif .svg .ico .bmp .tif .tiff .psd .ai .eps .exr .hdr .mp4 .webm .mov .avi .mp3 .wav .ogg .flac .woff .woff2 .ttf .otf .eot .zip .gz .tgz .tar .bz2 .xz .br .7z .rar .zst .doc .docx .ppt .pptx .xls .xlsx .map').split(' '));
 const PAYLOAD_KEYS = new Set(['vertices', 'positions', 'normals', 'indices', 'faces', 'uvs', 'meshdata', 'geometrydata', 'meshpayload', 'previewmesh', 'triangleindices', 'triangleids', 'membership', 'memberships', 'selectors', 'selector', 'runs']);
-const CATALOG_KEYS = new Set(['id', 'old', 'name', 'zh', 'system', 'size', 'bbox', 'triangles', 'fingerprint']);
+const CATALOG_KEYS = new Set(['id', 'old', 'name', 'zh', 'system', 'size', 'bbox', 'triangles', 'fingerprint', 'contentSignature', 'geometrySignature', 'geometryArea', 'variants']);
 const FRAME_KEYS = new Set(['rotation', 'origin', 'min', 'max', 'extent', 'hingeRotation', 'hingeMin', 'hingeMax', 'hingeBarrel', 'barrelSide']);
 const CATALOG_COUNT = 733;
 const SOURCE_LIMIT = 2 * 1024 * 1024;
@@ -31,7 +31,7 @@ function pathProblems(path, dist = false) {
   if (/(^|\/)(?:node_modules|private|local-models|\.git|coverage)(\/|$)/i.test(path)) issues.push('non-release directory');
   if (/(^|\/)(?:\.env(?:\..*)?|\.npmrc|credentials(?:\..*)?|id_rsa|id_ed25519)$/i.test(path) || /\.(?:pem|p12|pfx|key)$/i.test(path)) issues.push('credential file');
   if (dist) {
-    if (!['index.html', 'LICENSE', 'THIRD_PARTY_NOTICES.md', '.nojekyll'].includes(path) && !/^assets\/[a-zA-Z0-9_.-]+\.(?:js|css)$/.test(path)) issues.push('unexpected static output path');
+    if (!['index.html', 'LICENSE', 'THIRD_PARTY_NOTICES.md', '.nojekyll'].includes(path) && !/^assets\/[a-zA-Z0-9_.-]+\.(?:js|mjs|css)$/.test(path)) issues.push('unexpected static output path');
   } else if (!ROOT_FILES.has(path) && !(ROOT_DIRS.has(path.split('/')[0]) && SOURCE_EXTENSIONS.has(extension))) issues.push('outside the source release allowlist');
   return issues;
 }
@@ -65,6 +65,20 @@ function catalogProblems(records) {
     if (!['drawer', 'sustainer', 'mods'].includes(record.system)) issues.push(`${at}: unknown system`);
     if (!Number.isSafeInteger(record.size) || record.size < 1 || !Number.isSafeInteger(record.triangles) || record.triangles < 1) issues.push(`${at}: invalid size/triangle count`);
     if (!/^[a-f0-9]{64}$/.test(record.fingerprint)) issues.push(`${at}: invalid matching signature`);
+    if ('contentSignature' in record && !/^[a-f0-9]{64}$/.test(record.contentSignature)) issues.push(`${at}: invalid content signature`);
+    if ('geometrySignature' in record && !/^[a-f0-9]{64}$/.test(record.geometrySignature)) issues.push(`${at}: invalid geometry signature`);
+    if ('geometryArea' in record && (!Number.isFinite(record.geometryArea) || record.geometryArea < 0)) issues.push(`${at}: invalid surface-area metadata`);
+    if('variants' in record){
+      const allowed=new Set(['size','triangles','bbox','contentSignature','geometrySignature','geometryArea','piecesPerFile','referencePiecesPerFile','previewAligned','sourceFrames','transforms','note','requiresConfirmation']);
+      if(!Array.isArray(record.variants)||record.variants.length>8)issues.push(`${at}: invalid version list`);
+      else for(const v of record.variants){
+        if(Object.keys(v).some(k=>!allowed.has(k))||!Number.isSafeInteger(v.size)||v.size<1||!Number.isSafeInteger(v.triangles)||v.triangles<1||!['contentSignature','geometrySignature'].every(k=>/^[a-f0-9]{64}$/.test(v[k])))issues.push(`${at}: invalid version identity`);
+        if(!Array.isArray(v.bbox)||v.bbox.length!==2||!v.bbox.every(vector)||typeof v.previewAligned!=='boolean'||!Number.isInteger(v.referencePiecesPerFile)||v.referencePiecesPerFile<1||v.referencePiecesPerFile>32||v.piecesPerFile!==null&&(!Number.isInteger(v.piecesPerFile)||v.piecesPerFile<1||v.piecesPerFile>32))issues.push(`${at}: invalid version quantity/bounds`);
+        issues.push(...frameProblems({[record.id]:v.sourceFrames},true,new Set([record.id])));
+        if(!Array.isArray(v.transforms)||v.transforms.length!==v.sourceFrames?.length||v.transforms.some(t=>Object.keys(t).some(k=>!['rotation','translation'].includes(k))||!matrix(t.rotation)||!vector(t.translation)))issues.push(`${at}: invalid rigid preview transforms`);
+        if(typeof v.note!=='string'||v.note.length>300)issues.push(`${at}: invalid version note`);
+      }
+    }
     for (const key of ['old', 'name', 'zh']) if (typeof record[key] !== 'string' || !record[key].trim() || record[key].length > 500) issues.push(`${at}: invalid ${key}`);
     if (typeof record.old === 'string' && (/^(?:[a-z]:|[\\/])/i.test(record.old) || record.old.split(/[\\/]/).includes('..'))) issues.push(`${at}: original path must be relative`);
     if (!Array.isArray(record.bbox) || record.bbox.length !== 2 || !record.bbox.every(vector) || record.bbox[0].some((v, axis) => v > record.bbox[1][axis])) issues.push(`${at}: invalid bounding box`);
@@ -114,8 +128,14 @@ function textProblems(text, { dist = false, json = false } = {}) {
   if (!json) {
     // Bundled Three.js contains legitimate small lookup tables. Source is stricter.
     const count = dist ? 4096 : 256;
-    const numbers = new RegExp('\\[\\s*(?:[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:e[-+]?\\d+)?\\s*,\\s*){' + count + ',}', 'i');
-    if (numbers.test(text)) issues.push('oversized numeric literal array');
+    // Scan number runs linearly. A repeated ambiguous numeric regex can
+    // backtrack exponentially on a normal minified dependency lookup table.
+    const starts=/\[\s*(?=[+\-.\d])/g,number=/\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?\s*([,\]])/iy;
+    for(let start;(start=starts.exec(text));){let position=starts.lastIndex,n=0;
+      while(n<count){number.lastIndex=position;const token=number.exec(text);if(!token)break;position=number.lastIndex;n++;if(token[1]===']')break;}
+      if(n>=count){issues.push('oversized numeric literal array');break;}
+      starts.lastIndex=Math.max(starts.lastIndex,position);
+    }
   }
   return issues;
 }
@@ -194,6 +214,8 @@ export async function auditRelease(root = ROOT, { requireDist = false } = {}) {
     const official = normalizedText(await readFile(installedLicense, 'utf8'));
     if (!normalizedText(notices).includes(official)) issues.push('THIRD_PARTY_NOTICES.md: installed Three.js license is not reproduced verbatim');
   }
+  const pdfLicense=resolve(root,'node_modules/pdfjs-dist/LICENSE');
+  if(pkg?.dependencies?.['pdfjs-dist']&&await exists(pdfLicense)&&!normalizedText(notices).includes(normalizedText(await readFile(pdfLicense,'utf8'))))issues.push('THIRD_PARTY_NOTICES.md: installed PDF.js license is not reproduced verbatim');
   const distRoot = resolve(root, 'dist');
   const hasDist = await exists(distRoot);
   if (hasDist) {

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#171613">
+  <meta name="theme-color" content="#0b0d10">
   <meta name="description" content="本地 STL 打印工作台。配置模块、组合布局，追踪每一个零件的打印进度。">
   <link rel="icon" href="data:,">
   <title>VAULT PRINT STUDIO · 本地打印工作台</title>
@@ -45,12 +45,15 @@
         </div>
         <p class="local-promise"><span class="status-dot" aria-hidden="true"></span>本地文件留在你的设备上</p>
       </div>
-      <div class="gate-art" aria-hidden="true">
-        <div class="art-corner corner-tl"></div><div class="art-corner corner-tr"></div><div class="art-corner corner-bl"></div><div class="art-corner corner-br"></div>
-        <span class="art-coordinate">LOCAL / OBJECT SPACE</span>
-        <div class="cube-orbit"><div class="abstract-cube"><span class="cube-face cube-front"></span><span class="cube-face cube-back"></span><span class="cube-face cube-right"></span><span class="cube-face cube-left"></span><span class="cube-face cube-top"></span><span class="cube-face cube-bottom"></span><span class="cube-core"></span></div></div>
-        <div class="art-baseline"><span>X — Y — Z</span><span>READY WHEN YOU ARE <b>↗</b></span></div>
-      </div>
+      <aside class="gate-art" aria-label="工作台使用流程">
+        <div class="entry-heading"><span class="eyebrow">FROM FILE TO FINISH</span><span class="entry-tag">本地工作流</span></div>
+        <ol class="entry-steps">
+          <li><span class="entry-number">01</span><div><h2>导入你的模型</h2><p>选择 STL 文件夹，核对匹配结果与缺失零件。</p></div><span class="entry-arrow" aria-hidden="true">↗</span></li>
+          <li><span class="entry-number">02</span><div><h2>配置与组合</h2><p>调整规格，在真实三维预览中检查装配与布局。</p></div><span class="entry-arrow" aria-hidden="true">↗</span></li>
+          <li><span class="entry-number">03</span><div><h2>逐件完成打印</h2><p>下载到切片软件，记录已打印数量，继续下一件。</p></div><span class="entry-arrow" aria-hidden="true">✓</span></li>
+        </ol>
+        <div class="entry-note"><span class="status-dot" aria-hidden="true"></span><p>模型由你提供。配置与打印记录可随时导出保存。</p></div>
+      </aside>
       <footer class="gate-footer"><p>本工具不提供模型文件，与原设计方无隶属关系。</p><a href="https://www.ussadesign.com/products/vault" target="_blank" rel="noopener noreferrer">前往 USSA Design 官方购买 <span aria-hidden="true">↗</span></a></footer>
     </section>
 
@@ -60,6 +63,7 @@
           <button class="tab is-active" data-tab="config" type="button" aria-current="page" aria-controls="tab-config"><span class="tab-index">01</span> 配置</button>
           <button class="tab" data-tab="combine" type="button" aria-controls="tab-combine"><span class="tab-index">02</span> 组合</button>
           <button class="tab" data-tab="library" type="button" aria-controls="tab-library"><span class="tab-index">03</span> 零件库</button>
+          <button class="tab" data-tab="manuals" type="button" aria-controls="tab-manuals"><span class="tab-index">04</span> 装配手册</button>
         </nav>
         <div class="current-progress"><span id="current-module">尚未选择模块</span><progress id="module-progress" value="0" max="100" aria-label="当前模块打印进度"></progress></div>
       </div>
@@ -78,7 +82,7 @@
                   <button data-view="exploded" aria-pressed="false" type="button">爆炸</button>
                   <button data-view="flat" aria-pressed="false" type="button">平铺</button>
                 </div>
-                <div class="stage-tools"><button id="open-toggle" class="btn btn-quiet" type="button" aria-pressed="false" title="打开或合上模块">开合</button><button id="color-tool" class="btn btn-icon" type="button" aria-label="选择模型颜色" aria-controls="color-palette" aria-expanded="false" title="模型配色"><span class="color-icon" aria-hidden="true"></span></button><button id="stage-reset" class="btn btn-icon" type="button" aria-label="重置视角" title="重置视角">↺</button></div>
+                <div class="stage-tools"><button id="printed-visibility" class="btn btn-quiet" type="button" aria-pressed="false" title="淡化已打印零件，突出待打印零件"><span aria-hidden="true">◒</span><span>淡化已打印</span></button><button id="open-toggle" class="btn btn-quiet" type="button" aria-pressed="false" title="打开或合上模块">开合</button><button id="color-tool" class="btn btn-icon" type="button" aria-label="选择模型颜色" aria-controls="color-palette" aria-expanded="false" title="模型配色"><span class="color-icon" aria-hidden="true"></span></button><button id="stage-reset" class="btn btn-icon" type="button" aria-label="重置视角" title="重置视角">↺</button></div>
               </div>
               <canvas id="stage" tabindex="0" aria-label="交互式模块三维预览；可使用视图按钮与装配步进控制">你的浏览器不支持 Canvas。仍可通过打印清单管理零件。</canvas>
               <div class="stage-caption"><span id="stage-status" role="status" aria-live="polite">选择配置以查看模型</span><span class="stage-axis" aria-hidden="true">X <i></i> Y <i></i> Z</span></div>
@@ -119,20 +123,44 @@
 
       <section id="tab-combine" class="tab-panel combine-panel" hidden aria-label="组合布局">
         <div class="section-heading"><div><p class="eyebrow">COMPOSE YOUR SETUP</p><h1>组合工作台<span class="accent">.</span></h1></div><div class="plan-actions"><label class="visually-hidden" for="plan-select">选择组合方案</label><select id="plan-select"><option value="">选择方案</option></select><button id="plan-new" class="btn btn-primary" type="button">新建方案 ＋</button><button id="plan-duplicate" class="btn btn-outline" type="button">复制</button><button id="plan-remove" class="btn btn-quiet danger" type="button">删除</button></div></div>
-        <div class="plan-layout"><div class="plan-stage"><div class="plan-stage-heading"><label class="field-inline" for="plan-name"><span>方案名称</span><input id="plan-name" placeholder="为组合命名" maxlength="100"></label><span class="eyebrow">ASSEMBLY VIEW</span></div><canvas id="plan-canvas" tabindex="0" aria-label="组合方案三维预览"></canvas><div id="plan-validation" class="plan-validation" role="status" aria-live="polite"></div></div><aside class="plan-sidebar"><h2>放置模块</h2><p class="muted">选择模块，再选择布局位置。</p><div id="plan-palette" class="plan-palette"></div><h3>布局</h3><div id="plan-grid" class="plan-grid" aria-label="组合位置"></div><h3>组合中的模块</h3><div id="plan-units" class="plan-units"></div></aside></div>
+        <div class="plan-layout">
+          <div class="plan-stage">
+            <div class="plan-stage-heading"><label class="field-inline" for="plan-name"><span>方案名称</span><input id="plan-name" placeholder="为组合命名" maxlength="100"></label><button id="plan-reset" class="btn btn-outline" type="button" title="重置组合视角"><span aria-hidden="true">↺</span> 重置视角</button></div>
+            <div class="plan-viewport"><canvas id="plan-canvas" tabindex="0" aria-label="组合方案三维预览"></canvas><div id="plan-selection" class="plan-selection" hidden role="status" aria-live="polite"></div><p class="plan-canvas-hint">拖动旋转 · 滚轮缩放 · 点击选择模块</p></div>
+            <div id="plan-validation" class="plan-validation" role="status" aria-live="polite"></div>
+            <div class="plan-stage-footer"><p class="muted">确认布局后，继续配置模块与打印零件。</p><button id="plan-finish" class="btn btn-primary" type="button">完成组合 → 配置与打印</button></div>
+          </div>
+          <aside class="plan-sidebar"><div class="panel-heading"><h2>搭建组合</h2><span class="eyebrow">LAYOUT</span></div><p class="muted">选择模块类型与排列，再逐层添加。</p><div id="plan-palette" class="plan-palette"></div><h3>层级布局</h3><div id="plan-grid" class="plan-grid" aria-label="组合位置"></div><h3>组合中的模块</h3><div id="plan-units" class="plan-units"></div></aside>
+        </div>
       </section>
 
       <section id="tab-library" class="tab-panel library-panel" hidden aria-label="本地零件库">
         <div class="section-heading"><div><p class="eyebrow">YOUR LOCAL COLLECTION</p><h1>零件库<span class="accent">.</span></h1></div><span id="library-count" class="library-count" aria-live="polite">尚无模型</span></div>
-        <div class="library-filters"><label class="search-field"><span class="visually-hidden">搜索零件库</span><input id="library-search" type="search" placeholder="搜索零件名称、中英文文件名…" autocomplete="off"></label><label class="field-inline" for="library-category"><span>类别</span><select id="library-category"><option value="all">全部类别</option></select></label><label class="field-inline" for="library-scope"><span>范围</span><select id="library-scope"><option value="all">全部零件</option><option value="current">当前模块</option><option value="missing">缺失文件</option></select></label></div>
+        <div class="library-filters"><label class="search-field"><span class="visually-hidden">搜索零件库</span><input id="library-search" type="search" placeholder="搜索零件名称、中英文文件名…" autocomplete="off"></label><label class="field-inline" for="library-category"><span>类别</span><select id="library-category"><option value="all">全部类别</option></select></label><label class="field-inline" for="library-scope"><span>范围</span><select id="library-scope"><option value="all">全部零件</option><option value="current">当前模块所需</option><option value="fit">按规格适配</option><option value="missing">缺失文件</option></select></label></div>
+        <fieldset class="library-fit"><legend>适配规格</legend><p class="library-fit-help">范围选择「按规格适配」时，按以下尺寸查找兼容零件；「当前模块所需」跟随配置页的打印清单。</p><div class="library-fit-controls">
+          <label class="field" for="library-kind"><span>模块类型</span><select id="library-kind"><option value="drawer">抽屉 · Drawer</option><option value="sustainer">提箱 · Sustainer</option><option value="mods">扩展件 · Mods</option></select></label>
+          <label class="field" for="library-width"><span>宽度</span><select id="library-width"><option value="S">S</option><option value="M">M</option><option value="L">L</option><option value="XL">XL</option></select></label>
+          <label class="field" for="library-depth"><span>深度</span><select id="library-depth"><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option></select></label>
+          <label class="field" for="library-height"><span>层高</span><select id="library-height"><option value="1F">1F</option><option value="2F">2F</option><option value="4F">4F</option></select></label>
+          <label class="library-optional" for="library-optional"><input id="library-optional" type="checkbox" checked><span>包含兼容选配件</span></label>
+        </div></fieldset>
         <div id="library-list" class="library-list" aria-label="本地模型"></div>
+      </section>
+      <section id="tab-manuals" class="tab-panel manuals-panel" hidden aria-label="装配手册">
+        <div class="section-heading"><div><p class="eyebrow">ASSEMBLY REFERENCE</p><h1>装配手册<span class="accent">.</span></h1></div><span class="library-count">本地 PDF · 中英对照</span></div>
+        <p class="manual-notice">请导入你合法持有的官方 PDF 手册。文件仅在本机查看，版权归原作者所有；本工具不附带或分发官方模型与手册。</p>
+        <div class="manual-toolbar"><p id="manual-status" role="status" aria-live="polite">尚未导入手册。可分别选择英文版与中文版 PDF。</p><div class="manual-pagination" aria-label="手册翻页"><button id="manual-prev" class="btn btn-outline" type="button" aria-label="手册上一页">‹ 上一页</button><label for="manual-page">页码<input id="manual-page" type="number" min="1" step="1" value="1" inputmode="numeric"></label><button id="manual-next" class="btn btn-outline" type="button" aria-label="手册下一页">下一页 ›</button></div></div>
+        <div class="manual-grid">
+          <section class="manual-document" aria-labelledby="manual-en-title"><div class="manual-document-heading"><div><span class="eyebrow">ENGLISH</span><h2 id="manual-en-title">英文手册</h2></div><label class="btn btn-outline manual-upload" for="manual-en-file">选择 PDF ↥<input id="manual-en-file" class="visually-hidden" type="file" accept="application/pdf,.pdf"></label></div><div class="manual-view"><div class="manual-empty"><span class="manual-empty-icon" aria-hidden="true">EN</span><h3>导入英文版手册</h3><p>选择本地 PDF 后在此阅读。</p></div><iframe id="manual-en-frame" title="英文装配手册 PDF" src="about:blank"></iframe></div></section>
+          <section class="manual-document" aria-labelledby="manual-zh-title"><div class="manual-document-heading"><div><span class="eyebrow">中文 / CHINESE</span><h2 id="manual-zh-title">中文手册</h2></div><label class="btn btn-outline manual-upload" for="manual-zh-file">选择 PDF ↥<input id="manual-zh-file" class="visually-hidden" type="file" accept="application/pdf,.pdf"></label></div><div class="manual-view"><div class="manual-empty"><span class="manual-empty-icon" aria-hidden="true">中</span><h3>导入中文版手册</h3><p>选择本地 PDF 后在此阅读。</p></div><iframe id="manual-zh-frame" title="中文装配手册 PDF" src="about:blank"></iframe></div></section>
+        </div>
       </section>
     </div>
   </main>
 
   <dialog id="models-dialog" class="models-dialog" aria-labelledby="models-title">
     <div class="dialog-heading"><div><p class="eyebrow">LOCAL FILES / 本地文件</p><h2 id="models-title">模型管理<span class="accent">.</span></h2></div><button id="models-close" class="btn btn-icon" type="button" aria-label="关闭模型管理">×</button></div>
-    <div class="dialog-body"><div class="import-toolbar"><p id="import-summary" role="status" aria-live="polite">尚未导入模型</p><button class="btn btn-outline" data-action="import-folder" type="button">选择文件夹 ↥</button></div><div id="dialog-import-feedback"></div><p class="dialog-help">按 STL 文件指纹匹配，支持中英文及改名目录。不同版本会列为待确认，文件不会上传。</p><label class="search-field"><span class="visually-hidden">搜索文件匹配结果</span><input id="match-search" type="search" placeholder="搜索零件名称或文件名" autocomplete="off"></label><div id="match-list" class="match-list" aria-label="模型匹配结果"></div></div>
+    <div class="dialog-body"><div class="import-toolbar"><p id="import-summary" role="status" aria-live="polite">尚未导入模型</p><button class="btn btn-outline" data-action="import-folder" type="button">选择文件夹 ↥</button></div><div id="dialog-import-feedback"></div><p class="dialog-help">读取 STL 的实际几何内容，支持中英文、改名及重新导出文件。形状不同的版本单独核对；__MACOSX 附属文件自动跳过。文件不会上传。</p><label class="search-field"><span class="visually-hidden">搜索文件匹配结果</span><input id="match-search" type="search" placeholder="搜索零件名称或文件名" autocomplete="off"></label><div id="match-list" class="match-list" aria-label="模型匹配结果"></div></div>
     <div class="dialog-footer"><button id="clear-models" class="btn btn-quiet danger" type="button">清除已导入模型</button><button id="confirm-import" class="btn btn-primary" type="button">进入工作台 <span aria-hidden="true">→</span></button></div>
   </dialog>
 

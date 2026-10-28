@@ -12,6 +12,7 @@
     "audit:release": "node scripts/audit-release.mjs"
   },
   "dependencies": {
+    "pdfjs-dist": "5.4.296",
     "three": "0.180.0"
   },
   "devDependencies": {
