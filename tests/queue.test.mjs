@@ -1,11 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {freshState,sanitizeState,setPrinted} from '../src/state.js';
-import {queueUnits,reconcileQueue,selectQueue,selectQueueUnit,nextIncomplete} from '../src/queue.js';
+import {queueUnits,reconcileQueue,selectQueue,selectQueueUnit,nextIncomplete,deleteIndependent,undoIndependentDelete} from '../src/queue.js';
 import {moduleConfig,unitBOM,printProgress,changePlan} from '../src/planner.js';
 import catalog from '../src/catalog.json' with {type:'json'};
 
 const ids=new Set(catalog.map(p=>p.id));
+
+test('independent deletion selects a neighbour and undo survives reload with exact print records',()=>{
+  const state=fixture();selectQueueUnit(state,'u20');state.units[20].progress.m0010={printed:1,piecesPerFile:2,downloadedAt:'2026-10-29'};state.units[20].colors.test='#ff6b24';
+  const before=structuredClone(state.units),plans=structuredClone(state.plans);deleteIndependent(state,'u20');assert.equal(state.activeUnit,'u21');assert.deepEqual(state.units,before.filter(u=>u.id!=='u20'));assert.deepEqual(state.plans,plans);
+  const restored=sanitizeState(JSON.parse(JSON.stringify(state)),ids);const u=undoIndependentDelete(restored);assert.deepEqual(u,before[20]);assert.deepEqual(restored.units,before);assert.equal(restored.activeUnit,'u20');assert.equal(restored.deletedUnit,undefined);
+  selectQueue(restored,'p1');assert.equal(deleteIndependent(restored,'u0'),null);assert.deepEqual(restored.plans,plans);
+});
+test('last independent module can be deleted, remain empty on reload, and be restored',()=>{
+  let state=freshState(moduleConfig('drawer','S',3,'1F'));const original=structuredClone(state.units[0]);deleteIndependent(state,original.id);
+  assert.equal(state.units.length,0);assert.equal(state.activeUnit,null);assert.deepEqual(queueUnits(state),[]);
+  state=sanitizeState(JSON.parse(JSON.stringify(state)),ids);assert.equal(state.units.length,0);assert.deepEqual(undoIndependentDelete(state),original);assert.equal(state.units.length,1);
+});
 const complete=u=>printProgress(u,unitBOM(u).rows).done;
 function fixture(){
   const state=freshState(moduleConfig('drawer','S','3','1F'));

@@ -6,19 +6,21 @@ export function freshState(config){const unit={id:uid(),name:'我的第一个模
 export function setPrinted(unit,id,qty,piecesPerFile){if(!Number.isInteger(qty)||qty<0||qty>10000)throw Error('打印份数无效');if(piecesPerFile!==undefined&&piecesPerFile!==null&&(!Number.isSafeInteger(piecesPerFile)||piecesPerFile<1||piecesPerFile>10000))throw Error('每份文件的实体数无效');unit.progress[id]={...unit.progress[id],printed:qty,...(piecesPerFile!==undefined?{piecesPerFile}:{})};}
 export function downloaded(unit,id){unit.progress[id]={...unit.progress[id],downloadedAt:new Date().toISOString()};}
 export function sanitizeState(raw,ids){
-  if(!raw||raw.version!==1||!Array.isArray(raw.units)||raw.units.length<1||raw.units.length>200)throw Error('不支持的工作台文件');
-  const units=raw.units.map(u=>{
+  if(!raw||raw.version!==1||!Array.isArray(raw.units)||raw.units.length>200)throw Error('不支持的工作台文件');
+  const cleanUnit=u=>{
     if(typeof u.id!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(u.id)||!u.config||!['drawer','sustainer','mods'].includes(u.config.kind))throw Error('模块配置无效');
     const progress={},colors={};for(const [id,p]of Object.entries(u.progress||{})){if(!ids.has(id))continue;if(!p||!Number.isInteger(p.printed??0)||p.printed<0||p.printed>10000)throw Error('打印记录数量无效');if(Object.hasOwn(p,'piecesPerFile')&&p.piecesPerFile!==null&&(!Number.isSafeInteger(p.piecesPerFile)||p.piecesPerFile<1||p.piecesPerFile>10000))throw Error('打印记录实体数无效');progress[id]={printed:p.printed||0,...(Object.hasOwn(p,'piecesPerFile')?{piecesPerFile:p.piecesPerFile}:{}),...(typeof p.downloadedAt==='string'?{downloadedAt:p.downloadedAt.slice(0,30)}:{})};}
     for(const [key,color]of Object.entries(u.colors||{})){if(key.length<200&&/^#[0-9a-f]{6}$/i.test(color))colors[key]=color;}
     const serialized=JSON.stringify(u.config);if(serialized.length>10000||/__proto__|constructor|prototype/.test(serialized))throw Error('配置字段无效');
     return {id:u.id,name:String(u.name||'模块').slice(0,100),config:JSON.parse(serialized),progress,colors};
-  });
+  };
+  const units=raw.units.map(cleanUnit);
   const unitIds=new Set(units.map(u=>u.id));if(unitIds.size!==units.length)throw Error('模块标识重复');
   const plans=(Array.isArray(raw.plans)?raw.plans:[]).slice(0,30).map(p=>{if(!p||typeof p.id!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(p.id))throw Error('组合标识无效');if(!Array.isArray(p.tiers)||p.tiers.length>30)throw Error('组合层配置无效');return {id:p.id,name:String(p.name||'组合').slice(0,100),tiers:p.tiers.map(t=>{if(!t||!['single','SS','SM'].includes(t.pattern)||!Array.isArray(t.ids)||t.ids.some(id=>!unitIds.has(id)))throw Error('组合层配置无效');return {pattern:t.pattern,ids:[...t.ids]};})};});
   if(new Set(plans.map(p=>p.id)).size!==plans.length)throw Error('组合标识重复');
   for(const plan of plans){const problem=validateTiers(plan.tiers,units);if(problem)throw Error(problem);}
-  const state={version:1,units,activeUnit:unitIds.has(raw.activeUnit)?raw.activeUnit:units[0].id,plans,activePlan:plans.some(p=>p.id===raw.activePlan)?raw.activePlan:plans[0]?.id||null,queuePlan:raw.queuePlan===null?null:plans.some(p=>p.id===raw.queuePlan)?raw.queuePlan:undefined,sound:raw.sound===true,printedGhost:raw.printedGhost!==false};
+  const state={version:1,units,activeUnit:unitIds.has(raw.activeUnit)?raw.activeUnit:raw.activeUnit===null?null:units[0]?.id??null,plans,activePlan:plans.some(p=>p.id===raw.activePlan)?raw.activePlan:plans[0]?.id||null,queuePlan:raw.queuePlan===null?null:plans.some(p=>p.id===raw.queuePlan)?raw.queuePlan:undefined,sound:raw.sound===true,printedGhost:raw.printedGhost!==false};
+  if(raw.deletedUnit){const unit=cleanUnit(raw.deletedUnit.unit);if(!unitIds.has(unit.id))state.deletedUnit={unit,index:Number.isInteger(raw.deletedUnit.index)?Math.max(0,Math.min(200,raw.deletedUnit.index)):units.length};}
   reconcileQueue(state);return state;
 }
 export function validateTiers(tiers,units){

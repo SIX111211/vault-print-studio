@@ -28,3 +28,17 @@ export function nextIncomplete(state,isComplete){
   const units=queueUnits(state),index=units.findIndex(u=>u.id===state.activeUnit);
   return [...units.slice(index+1),...units.slice(0,Math.max(0,index))].find(u=>!isComplete(u))||null;
 }
+
+export function deleteIndependent(state,id){
+  const units=queueUnits(state,null),index=units.findIndex(u=>u.id===id);
+  if(state.queuePlan!==null||index<0)return null;
+  const removed=units[index];state.deletedUnit={unit:structuredClone(removed),index:state.units.indexOf(removed)};
+  state.units=state.units.filter(u=>u.id!==id);
+  state.activeUnit=(units[index+1]||units[index-1])?.id??null;
+  return removed;
+}
+export function undoIndependentDelete(state){
+  const removed=state.deletedUnit;if(!removed||state.units.length>=200||state.units.some(u=>u.id===removed.unit.id))return null;
+  state.units.splice(Math.min(state.units.length,removed.index),0,removed.unit);
+  state.activeUnit=removed.unit.id;state.queuePlan=null;delete state.deletedUnit;return removed.unit;
+}

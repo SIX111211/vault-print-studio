@@ -395,3 +395,13 @@ test('failed or cancelled imports cannot replace the active model recovery list'
   app.run("resolveScan({matches:new Map([['stale',{file:original}]])})");await app.run('pendingImport');
   assert.equal(app.run('importedFiles.length'),0);assert.equal(app.run('matches.size'),0);assert.equal(app.run('importBusy'),false);
 });
+
+test('delete and undo buttons preserve imported models, handle empty state, and exclude plan members',async()=>{
+  const app=await appHarness();app.run("var originalId=unit().id;unit().progress.m0010={printed:1};var model=new Blob();matches.set('m0010',{file:model});mainViewer=makeViewer('stage',{});render()");await app.flush();
+  app.node('module-new').onclick();await app.flush();assert.equal(app.node('module-delete').hidden,false);const added=app.run('unit().id');
+  app.node('module-delete').onclick();await app.flush();assert.equal(app.run('unit().id'),app.run('originalId'));assert.equal(app.run('unit().progress.m0010.printed'),1);assert.equal(app.run("matches.get('m0010').file===model"),true);assert.equal(app.node('module-deleted').hidden,false);
+  app.node('module-undo-delete').onclick();await app.flush();assert.equal(app.run('unit().id'),added);assert.equal(app.node('module-deleted').hidden,true);
+  app.node('module-delete').onclick();app.node('module-delete').onclick();await app.flush();assert.equal(app.run('state.units.length'),0);assert.equal(app.node('.workbench').hidden,true);assert.equal(app.node('module-delete').hidden,true);
+  app.run("showTab('library');syncPreferences()");await app.flush();app.node('module-undo-delete').onclick();await app.flush();assert.equal(app.run('unit().progress.m0010.printed'),1);assert.equal(app.node('.workbench').hidden,false);
+  app.run("showTab('combine');addTier();finishPlan()");await app.flush();assert.equal(app.node('module-delete').hidden,true);const count=app.run('state.units.length');app.node('module-delete').onclick();assert.equal(app.run('state.units.length'),count);
+});

@@ -71,10 +71,11 @@
       <section id="tab-config" class="tab-panel" aria-label="模块配置">
         <div class="module-bar">
           <div class="module-picker"><label class="eyebrow" for="queue-plan-select">COMBINATION PLAN / 组合方案</label><select id="queue-plan-select" aria-label="选择组合方案或独立模块"></select><select id="module-switch" aria-label="切换模块" hidden tabindex="-1"></select></div>
-          <div class="module-queue-actions"><button id="module-new" class="btn btn-outline" type="button" title="新建到独立模块">＋ 独立模块</button><button id="module-next" class="btn btn-primary" type="button" disabled>下一未完成模块 →</button></div>
+          <div class="module-queue-actions"><button id="module-delete" class="btn btn-outline" type="button" hidden>删除当前模块</button><button id="module-new" class="btn btn-outline" type="button" title="新建到独立模块">＋ 独立模块</button><button id="module-next" class="btn btn-primary" type="button" disabled>下一未完成模块 →</button></div>
         </div>
         <div id="module-cards" class="module-cards" role="group" aria-label="当前方案的模块"></div>
         <p id="module-queue-status" class="module-queue-status" role="status" aria-live="polite"></p>
+        <div id="module-deleted" class="module-deleted" hidden><span id="module-deleted-label" role="status"></span><button id="module-undo-delete" class="btn btn-outline" type="button">撤销上次删除</button></div>
         <div class="workbench">
           <div class="stage-area">
             <div id="stage-wrap" class="stage-wrap">

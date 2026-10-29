@@ -620,7 +620,12 @@ progress { height: 4px; border-radius: 9px; }
 .module-picker { min-width: 0; flex: 1; }
 .module-picker > .eyebrow { max-width: none; font-size: 9px; }
 #queue-plan-select { width: min(310px,100%); min-width: 140px; font-weight: 600; }
-.module-queue-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.module-queue-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+#module-delete { color: #e4a08a; }
+#module-delete:hover { border-color: #e4a08a; background: #37241e; }
+.module-deleted { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 12px; }
+.module-deleted span { overflow-wrap: anywhere; }
+.module-deleted .btn { flex-shrink: 0; }
 .module-cards { display: flex; gap: 10px; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 4px 4px 8px; scroll-padding-inline: 4px; scrollbar-width: thin; overscroll-behavior-x: contain; }
 .module-card { position: relative; flex: 0 0 274px; display: grid; grid-template-columns: 88px minmax(0,1fr); align-items: center; gap: 10px; height: 92px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); text-align: left; }
 .module-card:hover { border-color: var(--muted); }
