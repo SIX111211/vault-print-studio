@@ -28,3 +28,6 @@ local-models/
 test-results/
 playwright-report/
 .playwright-cli/
+
+!public/manuals/*-en.pdf
+!public/manuals/*-zh.pdf

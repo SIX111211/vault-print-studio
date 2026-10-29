@@ -4,6 +4,8 @@ import {readFile} from 'node:fs/promises';
 import {createContext,runInContext} from 'node:vm';
 import * as stateAPI from '../src/state.js';
 import * as plannerAPI from '../src/planner.js';
+import * as queueAPI from '../src/queue.js';
+import books from '../src/manual-library.json' with {type:'json'};
 import catalog from '../src/catalog.json' with {type:'json'};
 import {buildBOM,defaults,configurationOptions} from '../src/rules.js';
 import {buildScene,componentFrames} from '../src/assembly.js';
@@ -214,6 +216,7 @@ async function appHarness({pdfFactory}={}){
     selectKeys(keys){this.selectedKeys=keys;}
     fit(){this.fits=(this.fits||0)+1;}
     select(){}
+    clear(){}
   }
   let urlIndex=0;
   const getDocument=options=>{
@@ -224,9 +227,9 @@ async function appHarness({pdfFactory}={}){
     }};pdfDocs.push(doc);
     return {promise:Promise.resolve(doc),destroy:()=>doc.destroy()};
   };
-  const context=createContext({...stateAPI,...plannerAPI,catalog,buildBOM,defaults,configurationOptions,buildScene,componentFrames,Viewer:FakeViewer,crypto,structuredClone,Blob,clearGeometry(){},clearThumbnails(){},scanFiles(){},thumbnail(){return Promise.reject(Error('Invalid geometry'));},
+  const context=createContext({books,AbortController,bundledManual:async()=>{throw Error("offline test");},initUpdates(){},workspaceRecovery:()=>({prepare(){},resume(){},invalidate(){}}),...stateAPI,...plannerAPI,...queueAPI,catalog,buildBOM,defaults,configurationOptions,buildScene,componentFrames,Viewer:FakeViewer,crypto,structuredClone,Blob,clearGeometry(){},clearThumbnails(){},scanFiles(){},thumbnail(){return Promise.reject(Error('Invalid geometry'));},moduleThumbnail(){return Promise.resolve({url:'data:image/webp;base64,test',missing:0,unresolved:false});},
     getDocument,GlobalWorkerOptions:{},pdfWorkerURL:'/assets/pdf.worker.min.mjs',
-    document:{getElementById:node,createElement:tag=>node(tag+'-'+(++canvasId)),querySelectorAll(){return [];},addEventListener(k,fn){listeners[k]=fn;}},window:{devicePixelRatio:3,addEventListener(){}},IntersectionObserver:class{constructor(callback){this.callback=callback;}observe(){}unobserve(){}},ResizeObserver:class{constructor(callback){this.callback=callback;}observe(){}disconnect(){this.disconnected=true;}},localStorage:{getItem(){return null;},setItem(){}},URL:{createObjectURL(){return 'blob:local-'+(++urlIndex);},revokeObjectURL(url){revoked.push(url);}},setTimeout(fn){const id=++timerId;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);},clearInterval(){}});
+    requestAnimationFrame(fn){fn();},document:{getElementById:node,querySelector:node,createElement:tag=>node(tag+'-'+(++canvasId)),querySelectorAll(){return [];},addEventListener(k,fn){listeners[k]=fn;}},window:{devicePixelRatio:3,addEventListener(){}},IntersectionObserver:class{constructor(callback){this.callback=callback;}observe(){}unobserve(){}disconnect(){}},ResizeObserver:class{constructor(callback){this.callback=callback;}observe(){}disconnect(){this.disconnected=true;}},localStorage:{getItem(){return null;},setItem(){}},URL:{createObjectURL(){return 'blob:local-'+(++urlIndex);},revokeObjectURL(url){revoked.push(url);}},setTimeout(fn){const id=++timerId;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);},clearInterval(){}});
   const manualSource=(await readFile(new URL('../src/manual-viewer.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'').replace('export class LocalManualViewer','class LocalManualViewer');runInContext(manualSource,context);
   const source=(await readFile(new URL('../src/app.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'');
   runInContext(source,context);
@@ -252,7 +255,7 @@ test('app mark/undo refresh both viewer states and ghost toggle preserves print 
 
 test('app preserves physical print progress across runner imports in cards, filters, selection and module completion',async()=>{
   const app=await appHarness();app.run("mainViewer=makeViewer('stage',{})");await app.run('render()');
-  app.run("var runner=bom.rows.find(r=>r.role==='runner-guide');downloaded(unit(),runner.id);for(const row of bom.rows)if(row.id!==runner.id)setPrinted(unit(),row.id,row.qty,row.piecesPerFile);mark(runner.id,1);ensurePlan().tiers=[{pattern:'single',ids:[unit().id]}]");
+  app.run("var runner=bom.rows.find(r=>r.role==='runner-guide');downloaded(unit(),runner.id);for(const row of bom.rows)if(row.id!==runner.id)setPrinted(unit(),row.id,row.qty,row.piecesPerFile);mark(runner.id,1);ensurePlan().tiers=[{pattern:'single',ids:[unit().id]}];selectQueueUnit(state,unit().id)");
   assert.equal(app.run('unit().progress[runner.id].piecesPerFile'),1);const record=app.run('JSON.stringify(unit().progress[runner.id])');
   app.run("matches.set(runner.id,{file:new Blob(),variant:{piecesPerFile:2,referencePiecesPerFile:1}})");await app.run('render()');await app.run('renderPlan()');
   assert.equal(app.run('JSON.stringify(unit().progress[runner.id])'),record);assert.equal(app.run('unitComplete(unit())'),false);assert.ok(app.node('module-progress').value<100);
@@ -345,4 +348,50 @@ test('completed module chips and mini-layer buttons gain and lose completion cla
   finish(1);assert.match(app.node('plan-grid').innerHTML,/class="plan-tier [^"]*is-complete/);assert.equal((app.node('plan-units').innerHTML.match(/unit-chip is-complete/g)||[]).length,2);
   app.run('{const u=state.units.find(u=>u.id===currentPlan().tiers[0].ids[0]);setPrinted(u,unitBOM(u,matches).rows[0].id,0);renderPlanUI();}');
   assert.equal((app.node('plan-grid').innerHTML.match(/<button class="is-complete"/g)||[]).length,1);assert.doesNotMatch(app.node('plan-grid').innerHTML,/class="plan-tier [^"]*is-complete/);
+});
+
+test('queue workflow: finish chooses first incomplete, completion stays put, explicit next and card undo stay in the selected plan',async()=>{
+  const app=await appHarness();app.run("mainViewer=makeViewer('stage',{});showTab('combine');addTier();addTier();var planId=state.activePlan,first=currentPlan().tiers[0].ids[0],second=currentPlan().tiers[1].ids[0];selectedPlanUnit=second;finishPlan()");await app.flush();
+  assert.equal(app.run('state.queuePlan'),app.run('planId'));assert.equal(app.run('state.activeUnit'),app.run('first'));
+  assert.equal((app.node('module-cards').innerHTML.match(/data-queue-unit=/g)||[]).length,2);
+  assert.match(app.node('module-cards').innerHTML,/尚未导入此模块的 STL/);
+  app.run('for(const row of [...bom.rows])mark(row.id,row.qty)');assert.equal(app.run('state.activeUnit'),app.run('first'));
+  assert.match(app.node('module-cards').innerHTML,/module-card is-selected is-complete/);assert.match(app.node('module-cards').innerHTML,/✓ 已打印/);assert.equal(app.node('module-next').disabled,false);
+  app.node('module-next').onclick();await app.flush();assert.equal(app.run('state.activeUnit'),app.run('second'));
+  app.node('module-cards').onclick({target:{closest(){return {dataset:{queueUnit:app.run('first')}};}}});await app.flush();app.run('mark(bom.rows[0].id,0)');
+  assert.equal(app.run('state.activeUnit'),app.run('first'));assert.doesNotMatch(app.node('module-cards').innerHTML,/is-complete/);assert.match(app.node('module-cards').innerHTML,/aria-pressed="true"/);
+  app.run('selectedPlanUnit=second;finishPlan()');await app.flush();assert.equal(app.run('state.activeUnit'),app.run('first'));
+});
+
+test('queue duplication and deletion retain independent modules, isolate progress and copy per-instance colors',async()=>{
+  const app=await appHarness();app.run("showTab('combine');addTier();finishPlan();var oldPlan=state.queuePlan,oldUnit=state.activeUnit;unit().colors[oldUnit+':m0010:0:0']='#376680';for(const row of bom.rows)setPrinted(unit(),row.id,row.qty)");await app.flush();
+  app.node('plan-duplicate').onclick();await app.flush();assert.equal(app.run('state.queuePlan'),app.run('oldPlan'));assert.equal(app.run('state.activeUnit'),app.run('oldUnit'));
+  assert.equal(app.run('state.plans.length'),2);app.run('finishPlan()');await app.flush();assert.notEqual(app.run('state.activeUnit'),app.run('oldUnit'));assert.equal(app.run('Object.keys(unit().progress).length'),0);
+  assert.equal(app.run("unit().colors[unit().id+':m0010:0:0']"),'#376680');assert.equal(app.run("Object.hasOwn(unit().colors,oldUnit+':m0010:0:0')"),false);
+  const count=app.run('state.units.length'),removed=app.run('state.activeUnit');app.node('plan-remove').onclick();await app.flush();
+  assert.equal(app.run('state.units.length'),count);assert.equal(app.run('state.queuePlan'),null);assert.equal(app.run('state.activeUnit'),removed);
+  assert.match(app.node('queue-plan-select').innerHTML,/独立模块 · 2 个/);assert.equal((app.node('module-cards').innerHTML.match(/data-queue-unit=/g)||[]).length,2);
+  assert.equal(app.run('unitComplete(state.units.find(u=>u.id===oldUnit))'),true);
+});
+
+test('queue dropdown is separate from combine selection, handles empty plans, new independent module and restore',async()=>{
+  const app=await appHarness();app.run("showTab('combine');addTier();finishPlan();var saved=JSON.stringify(state),savedPlan=state.queuePlan,savedUnit=state.activeUnit");await app.flush();
+  app.node('plan-new').onclick();await app.flush();const editor=app.run('state.activePlan');assert.notEqual(editor,app.run('savedPlan'));assert.equal(app.run('state.queuePlan'),app.run('savedPlan'));
+  app.node('queue-plan-select').onchange({target:{value:editor}});await app.flush();assert.equal(app.node('.workbench').hidden,true);assert.equal(app.node('module-next').disabled,true);assert.equal(app.node('module-cards').innerHTML,'');
+  app.node('module-new').onclick();await app.flush();assert.equal(app.run('state.queuePlan'),null);assert.equal(app.run('state.activePlan'),editor);assert.equal(app.node('.workbench').hidden,false);
+  app.run("matches.set(buildBOM(state.units.find(u=>u.id===savedUnit).config).rows[0].id,{file:new Blob()})");
+  await app.node('restore-project').onchange({target:{files:[new Blob([app.run('saved')])],value:'saved.json'}});await app.flush();
+  assert.equal(app.run('state.queuePlan'),app.run('savedPlan'));assert.equal(app.run('state.activeUnit'),app.run('savedUnit'));assert.equal(app.node('.workbench').hidden,false);
+  assert.match(app.node('module-cards').innerHTML,/data-module-thumb=/);assert.match(app.node('module-cards').innerHTML,/待打印/);
+});
+
+test('failed or cancelled imports cannot replace the active model recovery list',async()=>{
+  const app=await appHarness();
+  app.run("var original=new Blob(['original']);original.name='original.stl';importedFiles=[original];matches=new Map([['existing',{file:original}]]);scanFiles=async()=>{throw Error('read failed');}");
+  await app.run("importFiles([new Blob(['new'])])");
+  assert.equal(app.run('importedFiles[0]===original'),true);assert.equal(app.run("matches.get('existing').file===original"),true);
+  app.run('var resolveScan;scanFiles=()=>new Promise(resolve=>resolveScan=resolve);var pendingImport=importFiles([original])');
+  app.node('clear-models').onclick();
+  app.run("resolveScan({matches:new Map([['stale',{file:original}]])})");await app.run('pendingImport');
+  assert.equal(app.run('importedFiles.length'),0);assert.equal(app.run('matches.size'),0);assert.equal(app.run('importBusy'),false);
 });

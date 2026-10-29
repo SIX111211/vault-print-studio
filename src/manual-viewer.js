@@ -5,7 +5,8 @@ import {validateManualPDF} from './planner.js';
 GlobalWorkerOptions.workerSrc=pdfWorkerURL;
 const MAX_PIXELS=8_000_000;
 
-// Bytes come only from a user-selected File. PDF.js assets use the bundled local worker.
+// Bytes come from a selected local File or a hash-verified bundled manual.
+// PDF.js assets use the bundled same-origin worker.
 export class LocalManualViewer{
   constructor({container,iframe,onChange=()=>{}}){
     this.container=container;this.iframe=iframe;this.onChange=onChange;
@@ -30,6 +31,12 @@ export class LocalManualViewer{
     this.cancelRender();const doc=this.doc,task=this.loadingTask;
     this.doc=null;this.loadingTask=null;this.page=0;
     if(doc)await doc.destroy();else if(task)await task.destroy();
+  }
+  async reset(){
+    this.selection++;this.loading=false;this.rendering=false;this.error='';
+    await this.releaseDocument();this.canvas.style.display='none';this.canvas.setAttribute('aria-busy','false');
+    if(this.empty){this.empty.hidden=false;this.empty.style.display='flex';}
+    this.notify();
   }
   async load(file,requestedPage=this.requestedPage){
     const selection=++this.selection;

@@ -1,0 +1,9 @@
+.update-check.has-update { color: var(--orange); background: var(--orange-soft); }
+.updates-dialog { width: min(540px,calc(100vw - 28px)); }
+.updates-dialog .dialog-body { display: grid; gap: 16px; }
+#updates-state { font-size: 19px; }
+#updates-notes { margin: 0; padding-left: 20px; color: var(--muted); }
+#updates-notes li + li { margin-top: 7px; }
+.update-auto { display: flex; align-items: center; gap: 10px; }
+.updates-dialog .dialog-footer { flex-wrap: wrap; }
+@media(max-width:600px) { .update-check { padding-inline: 8px; } }

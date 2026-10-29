@@ -1,0 +1,9 @@
+.manual-books { display: flex; align-items: stretch; gap: 8px; overflow-x: auto; padding: 3px 2px 12px; }
+.manual-book { min-width: 146px; flex: 1 0 auto; display: grid; gap: 4px; padding: 13px 16px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.manual-book small { color: var(--muted); font: 10px var(--mono); }
+.manual-book[aria-pressed="true"] { border-color: var(--orange); background: var(--orange-soft); box-shadow: inset 0 2px var(--orange); }
+.manual-book[aria-pressed="true"] strong { color: var(--orange); }
+.manual-source { color: var(--muted); font-size: 10px; }
+.manual-notice { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+.manual-notice .btn { flex-shrink: 0; }
+@media(max-width:600px) { .manual-notice { align-items: flex-start; flex-direction: column; }.manual-book { min-width: 138px; }.manual-books { margin-inline: -2px; } }

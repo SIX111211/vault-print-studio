@@ -1,0 +1,97 @@
+[
+  {
+    "id": "instructions",
+    "title": "系统使用",
+    "englishTitle": "System guide",
+    "files": {
+      "en": {
+        "path": "manuals/instructions-en.pdf",
+        "size": 4728133,
+        "sha256": "c43b3ce5facff6905677cb611ad7fd5ccd5686b3cb4b8526829f2ee291cd372f",
+        "pages": 20
+      },
+      "zh": {
+        "path": "manuals/instructions-zh.pdf",
+        "size": 7443720,
+        "sha256": "bac404820d4808753b3a7a78627bff76b2802379d76e66241b13197795c50315",
+        "pages": 20
+      }
+    }
+  },
+  {
+    "id": "drawer",
+    "title": "抽屉装配",
+    "englishTitle": "Drawer assembly",
+    "files": {
+      "en": {
+        "path": "manuals/drawer-en.pdf",
+        "size": 1745418,
+        "sha256": "b768dd060e0d00cdaa8838133731e03cbbfaba2873355ba774d796477360858b",
+        "pages": 8
+      },
+      "zh": {
+        "path": "manuals/drawer-zh.pdf",
+        "size": 2328776,
+        "sha256": "9d1e4ef5324df3a41b44be28766018414093a7395f3910d509726690c8466b10",
+        "pages": 8
+      }
+    }
+  },
+  {
+    "id": "sustainer",
+    "title": "翻盖箱装配",
+    "englishTitle": "Sustainer assembly",
+    "files": {
+      "en": {
+        "path": "manuals/sustainer-en.pdf",
+        "size": 1633119,
+        "sha256": "48cb8e4bca07199a65b2275eb239bb4d0ce7b934aca6c84fd35bce7033e5ec1a",
+        "pages": 7
+      },
+      "zh": {
+        "path": "manuals/sustainer-zh.pdf",
+        "size": 2148288,
+        "sha256": "c85d5dad6762655247701434d0e200707e9bdfeb283359ee3a1e4955db0044ca",
+        "pages": 7
+      }
+    }
+  },
+  {
+    "id": "modifications",
+    "title": "扩展改装",
+    "englishTitle": "Modifications",
+    "files": {
+      "en": {
+        "path": "manuals/modifications-en.pdf",
+        "size": 4139579,
+        "sha256": "f4441aefe44ff87f4b17f5b4d3f97569188a6d14bc1dac0b646e44a62e6ffbdc",
+        "pages": 17
+      },
+      "zh": {
+        "path": "manuals/modifications-zh.pdf",
+        "size": 5266219,
+        "sha256": "42c6a7b4422b8b34c609999a00c15f32e481265b2b2e383b4e69b1d13e46b71c",
+        "pages": 17
+      }
+    }
+  },
+  {
+    "id": "mounting",
+    "title": "安装固定",
+    "englishTitle": "Mounting",
+    "files": {
+      "en": {
+        "path": "manuals/mounting-en.pdf",
+        "size": 2732799,
+        "sha256": "d50ed518bd241f8fa6ea5d6423cef57fa6ee4e59b8dfdd254a86492b5864fc94",
+        "pages": 12
+      },
+      "zh": {
+        "path": "manuals/mounting-zh.pdf",
+        "size": 3724861,
+        "sha256": "a013afdd5206fededd72aad2e670807d0cf08dc57dbfd898880197a1cc979ea7",
+        "pages": 12
+      }
+    }
+  }
+]

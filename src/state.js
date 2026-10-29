@@ -1,7 +1,8 @@
+import {reconcileQueue} from './queue.js';
 export const STORAGE_KEY='vault-print-studio-v1';
 export const uid=()=>crypto.randomUUID();
 export const clone=value=>structuredClone(value);
-export function freshState(config){const unit={id:uid(),name:'我的第一个模块',config:clone(config),progress:{},colors:{}};return {version:1,activeUnit:unit.id,units:[unit],plans:[],activePlan:null,sound:false,printedGhost:true};}
+export function freshState(config){const unit={id:uid(),name:'我的第一个模块',config:clone(config),progress:{},colors:{}};return {version:1,activeUnit:unit.id,units:[unit],plans:[],activePlan:null,queuePlan:null,sound:false,printedGhost:true};}
 export function setPrinted(unit,id,qty,piecesPerFile){if(!Number.isInteger(qty)||qty<0||qty>10000)throw Error('打印份数无效');if(piecesPerFile!==undefined&&piecesPerFile!==null&&(!Number.isSafeInteger(piecesPerFile)||piecesPerFile<1||piecesPerFile>10000))throw Error('每份文件的实体数无效');unit.progress[id]={...unit.progress[id],printed:qty,...(piecesPerFile!==undefined?{piecesPerFile}:{})};}
 export function downloaded(unit,id){unit.progress[id]={...unit.progress[id],downloadedAt:new Date().toISOString()};}
 export function sanitizeState(raw,ids){
@@ -17,7 +18,8 @@ export function sanitizeState(raw,ids){
   const plans=(Array.isArray(raw.plans)?raw.plans:[]).slice(0,30).map(p=>{if(!p||typeof p.id!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(p.id))throw Error('组合标识无效');if(!Array.isArray(p.tiers)||p.tiers.length>30)throw Error('组合层配置无效');return {id:p.id,name:String(p.name||'组合').slice(0,100),tiers:p.tiers.map(t=>{if(!t||!['single','SS','SM'].includes(t.pattern)||!Array.isArray(t.ids)||t.ids.some(id=>!unitIds.has(id)))throw Error('组合层配置无效');return {pattern:t.pattern,ids:[...t.ids]};})};});
   if(new Set(plans.map(p=>p.id)).size!==plans.length)throw Error('组合标识重复');
   for(const plan of plans){const problem=validateTiers(plan.tiers,units);if(problem)throw Error(problem);}
-  return {version:1,units,activeUnit:unitIds.has(raw.activeUnit)?raw.activeUnit:units[0].id,plans,activePlan:plans.some(p=>p.id===raw.activePlan)?raw.activePlan:plans[0]?.id||null,sound:raw.sound===true,printedGhost:raw.printedGhost!==false};
+  const state={version:1,units,activeUnit:unitIds.has(raw.activeUnit)?raw.activeUnit:units[0].id,plans,activePlan:plans.some(p=>p.id===raw.activePlan)?raw.activePlan:plans[0]?.id||null,queuePlan:raw.queuePlan===null?null:plans.some(p=>p.id===raw.queuePlan)?raw.queuePlan:undefined,sound:raw.sound===true,printedGhost:raw.printedGhost!==false};
+  reconcileQueue(state);return state;
 }
 export function validateTiers(tiers,units){
   if(!Array.isArray(tiers)||!Array.isArray(units))return '组合层配置无效';

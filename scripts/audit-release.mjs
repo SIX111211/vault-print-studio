@@ -3,6 +3,8 @@ import { resolve, relative, extname, basename, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import manualBooks from '../src/manual-library.json' with {type:'json'};
 
 // Read-only release audit. Does not run Git mutations, upload, or copy files.
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -17,6 +19,16 @@ const CATALOG_COUNT = 733;
 const SOURCE_LIMIT = 2 * 1024 * 1024;
 const DIST_LIMIT = 4 * 1024 * 1024;
 const TOTAL_LIMIT = 24 * 1024 * 1024;
+const MANUAL_LIMIT = 80 * 1024 * 1024; // Includes both source and copied distribution PDFs.
+const MANUAL_RECORDS = new Map(manualBooks.flatMap(book=>['en','zh'].map(language=>[book.files[language].path,book.files[language]])));
+const manualRecord=(path,dist=false)=>MANUAL_RECORDS.get(dist?path:path.startsWith('public/')?path.slice(7):'');
+function manualProblems(bytes,record){
+  const issues=[];
+  if(bytes.length!==record.size||bytes.length>12*1024*1024)issues.push('manual size differs from reviewed manifest');
+  if(bytes.subarray(0,5).toString('ascii')!=='%PDF-')issues.push('manual is not a PDF');
+  if(createHash('sha256').update(bytes).digest('hex')!==record.sha256)issues.push('manual bytes differ from reviewed manifest');
+  return issues;
+}
 const canonicalKey = key => key.toLowerCase().replace(/[^a-z]/g, '');
 const forward = path => path.split(sep).join('/');
 const vector = value => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
@@ -27,12 +39,13 @@ function pathProblems(path, dist = false) {
   const issues = [];
   if (!path || path.includes('\\') || path.startsWith('/') || path.split('/').some(part => part === '..' || part === '.')) issues.push('unsafe relative path');
   const extension = extname(path).toLowerCase();
-  if (ASSET_EXTENSIONS.has(extension)) issues.push('model, media, document, archive or binary asset is forbidden');
+  const manual=manualRecord(path,dist);
+  if (ASSET_EXTENSIONS.has(extension)&&!manual) issues.push('model, media, unlisted document, archive or binary asset is forbidden');
   if (/(^|\/)(?:node_modules|private|local-models|\.git|coverage)(\/|$)/i.test(path)) issues.push('non-release directory');
   if (/(^|\/)(?:\.env(?:\..*)?|\.npmrc|credentials(?:\..*)?|id_rsa|id_ed25519)$/i.test(path) || /\.(?:pem|p12|pfx|key)$/i.test(path)) issues.push('credential file');
   if (dist) {
-    if (!['index.html', 'LICENSE', 'THIRD_PARTY_NOTICES.md', '.nojekyll'].includes(path) && !/^assets\/[a-zA-Z0-9_.-]+\.(?:js|mjs|css)$/.test(path)) issues.push('unexpected static output path');
-  } else if (!ROOT_FILES.has(path) && !(ROOT_DIRS.has(path.split('/')[0]) && SOURCE_EXTENSIONS.has(extension))) issues.push('outside the source release allowlist');
+    if (!manual&&!['index.html', 'version.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', '.nojekyll'].includes(path) && !/^assets\/[a-zA-Z0-9_.-]+\.(?:js|mjs|css)$/.test(path)) issues.push('unexpected static output path');
+  } else if (!manual&&!ROOT_FILES.has(path) && !(ROOT_DIRS.has(path.split('/')[0]) && SOURCE_EXTENSIONS.has(extension))) issues.push('outside the source release allowlist');
   return issues;
 }
 
@@ -163,6 +176,7 @@ async function sourcePaths(root) {
   const paths = [];
   for (const name of ROOT_FILES) if (await exists(resolve(root, name))) paths.push(name);
   for (const name of ROOT_DIRS) paths.push(...await walk(root, name));
+  paths.push(...await walk(root,'public/manuals'));
   return { mode: 'source-allowlist', paths };
 }
 
@@ -170,7 +184,7 @@ export async function auditRelease(root = ROOT, { requireDist = false } = {}) {
   root = resolve(root);
   const issues = [], jsonFiles = new Map(), texts = new Map();
   const { mode, paths } = await sourcePaths(root);
-  let count = 0, bytes = 0;
+  let count = 0, bytes = 0,manualBytes=0;
   async function inspect(path, dist = false) {
     const problems = pathProblems(path, dist);
     const label = dist ? `dist/${path}` : path;
@@ -184,7 +198,13 @@ export async function auditRelease(root = ROOT, { requireDist = false } = {}) {
     // Continue to inspect every byte and forbid symlinks/special files.
     if (stat.isSymbolicLink() || !stat.isFile()) { issues.push(`${label}: symbolic links and special files are forbidden`); return; }
     bytes += stat.size; count++;
-    if (stat.size > (dist ? DIST_LIMIT : SOURCE_LIMIT) || bytes > TOTAL_LIMIT) { issues.push(`${label}: release size budget exceeded`); return; }
+    const record=manualRecord(path,dist);
+    if(record){
+      manualBytes+=stat.size;
+      if(manualBytes>MANUAL_LIMIT){issues.push(`${label}: manual size budget exceeded`);return;}
+      issues.push(...manualProblems(await readFile(full),record).map(message=>`${label}: ${message}`));return;
+    }
+    if (stat.size > (dist ? DIST_LIMIT : SOURCE_LIMIT) || bytes-manualBytes > TOTAL_LIMIT) { issues.push(`${label}: release size budget exceeded`); return; }
     const text = await readFile(full, 'utf8');
     texts.set(label, text);
     issues.push(...textProblems(text, { dist, json: extname(path) === '.json' }).map(message => `${label}: ${message}`));
@@ -196,7 +216,7 @@ export async function auditRelease(root = ROOT, { requireDist = false } = {}) {
     }
   }
   for (const path of paths.sort()) await inspect(path);
-  for (const required of [...ROOT_FILES, 'src/catalog.json', 'src/orientation.json', 'src/assembly-data.json', 'scripts/audit-release.mjs', '.github/workflows/check.yml', '.github/workflows/pages.yml']) {
+  for (const required of [...ROOT_FILES, 'src/catalog.json', 'src/orientation.json', 'src/assembly-data.json','src/manual-library.json',...MANUAL_RECORDS.keys().map(path=>'public/'+path), 'scripts/audit-release.mjs', '.github/workflows/check.yml', '.github/workflows/pages.yml']) {
     if (!paths.includes(required)) issues.push(`${required}: required release file is not in the ${mode} set`);
   }
   const catalog = jsonFiles.get('src/catalog.json');
@@ -224,6 +244,7 @@ export async function auditRelease(root = ROOT, { requireDist = false } = {}) {
     else {
       const distPaths = (await walk(root, 'dist')).map(path => path.slice(5));
       for (const path of distPaths.sort()) await inspect(path, true);
+      for(const path of MANUAL_RECORDS.keys())if(!distPaths.includes(path))issues.push(`dist/${path}: bundled manual missing`);
       if (!distPaths.includes('index.html') || !distPaths.some(path => path.endsWith('.js')) || !distPaths.some(path => path.endsWith('.css'))) issues.push('dist: incomplete static build');
       if (requireDist) for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
         if (!texts.has(`dist/${name}`) || normalizedText(texts.get(`dist/${name}`)) !== normalizedText(texts.get(name) ?? '')) issues.push(`dist/${name}: missing or stale distribution notice`);
@@ -245,6 +266,12 @@ function selfTest() {
   for (const extension of ASSET_EXTENSIONS) check(pathProblems(`src/imported${extension.toUpperCase()}`).length > 0, `asset ${extension}`);
   check(!pathProblems('src/importer.js').length, 'source allowed');
   check(!pathProblems('assets/index-Ab1.js', true).length, 'bundled JS allowed');
+  check(!pathProblems('public/manuals/drawer-en.pdf').length,'reviewed source manual allowed');
+  check(!pathProblems('manuals/drawer-en.pdf',true).length,'reviewed distribution manual allowed');
+  check(pathProblems('public/manuals/arbitrary.pdf').length>0,'unlisted manual blocked');
+  check(pathProblems('manuals/model.stl',true).length>0,'model beside manuals blocked');
+  check(manualProblems(Buffer.from('%PDF-incorrect'),MANUAL_RECORDS.get('manuals/drawer-en.pdf')).length>0,'altered listed PDF blocked');
+  check(manualProblems(Buffer.from('solid fake'),MANUAL_RECORDS.get('manuals/drawer-en.pdf')).length>0,'model renamed to reviewed PDF blocked');
   check(pathProblems('assets/model.json', true).length > 0, 'extra dist data blocked');
   check(pathProblems('../outside.js').length > 0, 'traversal blocked');
   check(pathProblems('.env').length > 0, 'environment secret blocked');

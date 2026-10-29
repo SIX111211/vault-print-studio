@@ -266,3 +266,10 @@ PDF.js 5.4.296 by Mozilla and individual contributors renders user-selected PDFs
       of your accepting any such warranty or additional liability.
 
    END OF TERMS AND CONDITIONS
+
+## VAULT reference manuals
+
+The English manuals and original illustrations in `public/manuals/` are by USSA Design. The Chinese documents are unofficial translations supplied with this tool. They are reference documents, not MIT-licensed software assets. The code license does not grant rights to third-party models, manuals, illustrations, or trademarks.
+
+Original project: https://www.ussadesign.com/products/vault
+The release manifest in `src/manual-library.json` records the exact ten bundled files, page counts, sizes, and SHA-256 hashes. No model files are included.

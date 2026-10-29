@@ -2,10 +2,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import frames from './assembly-data.json' with {type:'json'};
 import {separateRectangles,easeInOut} from './viewer-layout.js';
+import {buildScene} from './assembly.js';
+import {createSourceKey,assembledThumbnailKey,ThumbnailQueue} from './navigation.js';
 
 const worker=new Worker(new URL('./mesh-worker.js',import.meta.url),{type:'module'});
 const pending=new Map(),cache=new Map(),pins=new Map(),viewers=new Set();let sequence=0,epoch=0,tail=Promise.resolve();
-function pin(ids,change){for(const id of ids)pins.set(id,Math.max(0,(pins.get(id)||0)+change));}
+const sourceKey=createSourceKey();
+function pin(ids,change){for(const id of ids){const count=Math.max(0,(pins.get(id)||0)+change);if(count)pins.set(id,count);else pins.delete(id);}}
 function disposeGeometry(v){for(const g of new Set([...v.geometries,...(v.alignedGeometries||[])]))g.dispose();}
 function trimCache(){for(const [id,promise]of cache){if(cache.size<=36)break;if(pins.get(id))continue;cache.delete(id);promise.then(disposeGeometry).catch(()=>{});}}
 worker.onmessage=({data})=>{const p=pending.get(data.key);if(!p)return;pending.delete(data.key);data.error?p.reject(Error(data.error)):p.resolve(data);};
@@ -13,7 +16,8 @@ worker.onerror=()=>{for(const p of pending.values())p.reject(Error('模型解析
 export function clearGeometry(){epoch++;for(const v of viewers)v.clear();for(const r of cache.values())r.then(disposeGeometry).catch(()=>{});cache.clear();}
 export function geometryFor(id,file,variant=null){
   if(!file)return Promise.reject(Error('请先导入此零件'));
-  if(cache.has(id)){const p=cache.get(id);if(p.sourceFile===file&&p.variant===variant){cache.delete(id);cache.set(id,p);return p;}cache.delete(id);p.then(disposeGeometry).catch(()=>{});}
+  const cacheKey=sourceKey(id,file,variant);
+  if(cache.has(cacheKey)){const p=cache.get(cacheKey);cache.delete(cacheKey);cache.set(cacheKey,p);return p;}
   const currentEpoch=epoch;
   const promise=tail.then(async()=>{
     if(epoch!==currentEpoch)throw Error('模型目录已切换');
@@ -24,7 +28,7 @@ export function geometryFor(id,file,variant=null){
     const alignedGeometries=variant?.previewAligned&&data.resolved?geometries.map((g,i)=>{const t=variant.transforms?.[i];if(!t)return g;const r=t.rotation,v=t.translation;return g.clone().applyMatrix4(new THREE.Matrix4().set(r[0][0],r[0][1],r[0][2],v[0],r[1][0],r[1][1],r[1][2],v[1],r[2][0],r[2][1],r[2][2],v[2],0,0,0,1));}):geometries;
     return {...data,parts:undefined,geometries,alignedGeometries};
   });
-  promise.sourceFile=file;promise.variant=variant;tail=promise.catch(()=>{});cache.set(id,promise);promise.catch(()=>{if(cache.get(id)===promise)cache.delete(id);});
+  tail=promise.catch(()=>{});cache.set(cacheKey,promise);promise.catch(()=>{if(cache.get(cacheKey)===promise)cache.delete(cacheKey);});
   return promise;
 }
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
@@ -51,7 +55,7 @@ export class Viewer {
     canvas.addEventListener('pointerup',e=>{if(!this.down||Math.hypot(e.clientX-this.down[0],e.clientY-this.down[1])>5)return;const b=canvas.getBoundingClientRect();this.pointer.set((e.clientX-b.left)/b.width*2-1,-(e.clientY-b.top)/b.height*2+1);this.ray.setFromCamera(this.pointer,this.camera);const hit=this.ray.intersectObjects(this.meshes).find(x=>x.object.visible);if(hit){this.select(hit.object.userData.key);this.onSelect(hit.object.userData);}});
     canvas.addEventListener('dblclick',()=>this.fit());
     this.controls.addEventListener('start',()=>{this.cameraMotion=null;});
-    this.resize=new ResizeObserver(()=>{cancelAnimationFrame(this.resizeFrame);this.resizeFrame=requestAnimationFrame(()=>{const b=canvas.getBoundingClientRect(),w=Math.round(b.width),h=Math.round(b.height);if(!w||!h||this.lastWidth===w&&this.lastHeight===h)return;this.lastWidth=w;this.lastHeight=h;this.renderer.setSize(w,h,false);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();});});this.resize.observe(canvas);
+    this.resize=new ResizeObserver(()=>{cancelAnimationFrame(this.resizeFrame);this.resizeFrame=requestAnimationFrame(()=>{const b=canvas.getBoundingClientRect(),w=Math.round(b.width),h=Math.round(b.height);if(!w||!h||this.lastWidth===w&&this.lastHeight===h)return;const previousAspect=this.camera.aspect;this.lastWidth=w;this.lastHeight=h;this.renderer.setSize(w,h,false);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();if(this.meshes.length&&Math.abs(Math.log(previousAspect/this.camera.aspect))>.15)this.fit({animate:false,preserveDirection:true});});});this.resize.observe(canvas);
     this.renderer.setAnimationLoop(()=>this.tick());
   }
   tick(){
@@ -66,11 +70,14 @@ export class Viewer {
     const ticket=++this.ticket;this.mode=mode;this.descriptors=scene.parts||[];
     this.canvas.setAttribute('aria-busy','true');this.canvas.dataset.modelCount='0';
     this.onStatus('正在读取本地模型…');
-    const ids=[...new Set(this.descriptors.map(p=>p.id))];pin(this.pinned,-1);this.pinned=ids;pin(ids,1);const loaded=new Map(),warnings=[];
+    const ids=[...new Set(this.descriptors.map(p=>p.id))],keys=ids.filter(id=>matches.has(id)).map(id=>sourceKey(id,matches.get(id).file,matches.get(id).variant));
+    pin(keys,1);let transferred=false;const loaded=new Map(),warnings=[];
+    try{
     for(const id of ids){if(ticket!==this.ticket)return;try{if(matches.has(id)){const match=matches.get(id);loaded.set(id,await geometryFor(id,match.file,match.variant));}}catch(e){warnings.push(id+'：'+e.message);}}
     if(ticket!==this.ticket)return;
     const previous=new Map(this.meshes.map(m=>[m.userData.key,{position:m.position.clone(),quaternion:m.quaternion.clone()}]));
     this.group.clear();for(const m of this.meshes)m.material.dispose();for(const m of this.rods||[]){m.geometry.dispose();m.material.dispose();}this.rods=[];this.meshes=[];
+    pin(this.pinned,-1);this.pinned=keys;transferred=true;
     const unresolved=new Set();
     for(const p of this.descriptors){
       const data=loaded.get(p.id);if(!data)continue;
@@ -94,6 +101,7 @@ export class Viewer {
     this.canvas.dataset.modelCount=String(this.meshes.length);this.canvas.setAttribute('aria-busy','false');
     const missing=ids.length-loaded.size,simplified=[...loaded.values()].some(x=>x.simplified);
     this.onStatus(`${this.meshes.length} 个模型实例 · 原尺寸${simplified?' · 密集网格已简化预览':''}${missing?` · 缺 ${missing} 类文件`:''}${unresolved.size?' · '+unresolved.size+' 类位置待核对':''}${warnings.length?' · '+warnings[0]:''}`);
+    }finally{if(!transferred)pin(keys,-1);trimCache();}
   }
   layout(mode=this.mode,immediate=false){
     for(const rod of this.rods||[])rod.visible=mode!=='flat';
@@ -135,15 +143,37 @@ export class Viewer {
   dispose(){this.clear();viewers.delete(this);this.resize.disconnect();cancelAnimationFrame(this.resizeFrame);this.renderer.setAnimationLoop(null);this.controls.dispose();this.renderer.dispose();trimCache();}
 }
 
-let thumbnailViewer,thumbTail=Promise.resolve(),thumbGeneration=0;const thumbnails=new Map();
-export function clearThumbnails(){thumbGeneration++;thumbnails.clear();}
+let thumbnailViewer;const thumbnails=new ThumbnailQueue(48);
+function getThumbnailViewer(){
+  if(!thumbnailViewer){const canvas=document.createElement('canvas');canvas.width=240;canvas.height=160;thumbnailViewer=new Viewer(canvas);thumbnailViewer.resize.disconnect();thumbnailViewer.renderer.setAnimationLoop(null);thumbnailViewer.renderer.setPixelRatio(1);thumbnailViewer.renderer.setSize(240,160,false);thumbnailViewer.camera.aspect=1.5;thumbnailViewer.camera.updateProjectionMatrix();thumbnailViewer.controls.enabled=false;}
+  return thumbnailViewer;
+}
+export function clearThumbnails(){thumbnails.clear();thumbnailViewer?.clear();trimCache();}
 export function thumbnail(id,file,variant=null){
-  if(thumbnails.has(id)&&thumbnails.get(id).sourceFile===file)return thumbnails.get(id);
-  const generation=thumbGeneration;
-  const p=thumbTail.then(async()=>{
-    if(generation!==thumbGeneration)throw Error('缩略图任务已取消');
-    if(!thumbnailViewer){const canvas=document.createElement('canvas');canvas.width=300;canvas.height=200;thumbnailViewer=new Viewer(canvas);thumbnailViewer.resize.disconnect();thumbnailViewer.renderer.setSize(300,200,false);thumbnailViewer.camera.aspect=1.5;thumbnailViewer.camera.updateProjectionMatrix();}
-    const data=await geometryFor(id,file,variant);if(generation!==thumbGeneration)throw Error('缩略图任务已取消');const box=new THREE.Box3();data.geometries.forEach(g=>box.union(g.boundingBox));const min=box.min.toArray(),max=box.max.toArray();const parts=data.geometries.map((g,component)=>({id,component,copy:0,key:`${id}:${component}`,cal:{matrix:[[1,0,0],[0,1,0],[0,0,1]],center:[0,0,0],min,max,size:max.map((v,i)=>v-min[i])},position:[0,0,0],color:[.76,.78,.79]}));
-    await thumbnailViewer.setScene({parts},new Map([[id,{file,variant}]]),{mode:'assembled',animate:false,raw:true});if(generation!==thumbGeneration)throw Error('缩略图任务已取消');return thumbnailViewer.capture();
-  });p.sourceFile=file;thumbTail=p.catch(()=>{});thumbnails.set(id,p);return p;
+  const key=sourceKey(id,file,variant);
+  return thumbnails.get('part:'+key,async valid=>{
+    pin([key],1);let viewer;
+    try{
+      const data=await geometryFor(id,file,variant);if(!valid())throw Error('缩略图任务已取消');const box=new THREE.Box3();data.geometries.forEach(g=>box.union(g.boundingBox));const min=box.min.toArray(),max=box.max.toArray();const parts=data.geometries.map((g,component)=>({id,component,copy:0,key:`${id}:${component}`,cal:{matrix:[[1,0,0],[0,1,0],[0,0,1]],center:[0,0,0],min,max,size:max.map((v,i)=>v-min[i])},position:[0,0,0],color:[.76,.78,.79]}));
+      viewer=getThumbnailViewer();await viewer.setScene({parts},new Map([[id,{file,variant}]]),{mode:'assembled',animate:false,raw:true});if(!valid())throw Error('缩略图任务已取消');return viewer.capture();
+    }finally{viewer?.clear();pin([key],-1);trimCache();}
+  });
+}
+export async function moduleThumbnail(unit,matches,isCurrent=()=>true){
+  const scene=buildScene({...unit.config,id:unit.id,colors:unit.colors},{open:0,explode:0,progress:Infinity});
+  const ids=[...new Set(scene.parts.map(p=>p.id))],sources=ids.map(id=>{const m=matches.get(id);return [sourceKey(id,m?.file,m?.variant),!!m?.manual];});
+  const key=assembledThumbnailKey(unit,thumbnails.generation,sources);
+  // Copy the map: a later manual association must not alter an already queued scene.
+  const snapshot=new Map(ids.filter(id=>matches.has(id)).map(id=>[id,{...matches.get(id)}]));
+  return thumbnails.get('module:'+key,async valid=>{
+    if(!snapshot.size)throw Error('尚未导入此模块的 STL');
+    const viewer=getThumbnailViewer();
+    try{
+      await viewer.setScene(scene,snapshot,{mode:'assembled',animate:false,colors:unit.colors});
+      if(!valid())throw Error('缩略图任务已取消');
+      if(!viewer.meshes.length)throw Error('模型预览不可用');
+      const loaded=new Set(viewer.meshes.map(m=>m.userData.id));
+      return {url:viewer.capture(),missing:ids.length-loaded.size,unresolved:viewer.meshes.some(m=>m.userData.unresolved)};
+    }finally{viewer.clear();trimCache();}
+  },isCurrent);
 }

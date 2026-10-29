@@ -70,9 +70,11 @@
 
       <section id="tab-config" class="tab-panel" aria-label="模块配置">
         <div class="module-bar">
-          <div class="module-picker"><label class="eyebrow" for="module-switch">MODULE / 模块</label><select id="module-switch" aria-label="切换模块"><option value="">选择模块</option></select><button id="module-new" class="btn btn-icon" type="button" title="新建模块" aria-label="新建模块">＋</button></div>
-          <span class="workspace-hint">配置一个模块，完成每一枚零件。</span>
+          <div class="module-picker"><label class="eyebrow" for="queue-plan-select">COMBINATION PLAN / 组合方案</label><select id="queue-plan-select" aria-label="选择组合方案或独立模块"></select><select id="module-switch" aria-label="切换模块" hidden tabindex="-1"></select></div>
+          <div class="module-queue-actions"><button id="module-new" class="btn btn-outline" type="button" title="新建到独立模块">＋ 独立模块</button><button id="module-next" class="btn btn-primary" type="button" disabled>下一未完成模块 →</button></div>
         </div>
+        <div id="module-cards" class="module-cards" role="group" aria-label="当前方案的模块"></div>
+        <p id="module-queue-status" class="module-queue-status" role="status" aria-live="polite"></p>
         <div class="workbench">
           <div class="stage-area">
             <div id="stage-wrap" class="stage-wrap">
@@ -147,12 +149,12 @@
         <div id="library-list" class="library-list" aria-label="本地模型"></div>
       </section>
       <section id="tab-manuals" class="tab-panel manuals-panel" hidden aria-label="装配手册">
-        <div class="section-heading"><div><p class="eyebrow">ASSEMBLY REFERENCE</p><h1>装配手册<span class="accent">.</span></h1></div><span class="library-count">本地 PDF · 中英对照</span></div>
-        <p class="manual-notice">请导入你合法持有的官方 PDF 手册。文件仅在本机查看，版权归原作者所有；本工具不附带或分发官方模型与手册。</p>
-        <div class="manual-toolbar"><p id="manual-status" role="status" aria-live="polite">尚未导入手册。可分别选择英文版与中文版 PDF。</p><div class="manual-pagination" aria-label="手册翻页"><button id="manual-prev" class="btn btn-outline" type="button" aria-label="手册上一页">‹ 上一页</button><label for="manual-page">页码<input id="manual-page" type="number" min="1" step="1" value="1" inputmode="numeric"></label><button id="manual-next" class="btn btn-outline" type="button" aria-label="手册下一页">下一页 ›</button></div></div>
+        <div class="section-heading"><div><p class="eyebrow">ASSEMBLY REFERENCE</p><h1>装配手册<span class="accent">.</span></h1></div><span class="library-count">内置 5 组 · 中英对照</span></div>
+        <nav id="manual-books" class="manual-books" aria-label="选择手册章节"></nav><div class="manual-notice"><span>英文原文与原图版权归 USSA Design。中文为非官方译文，可并排核对；也可换用自己的 PDF。</span><button id="manual-builtins" class="btn btn-outline" type="button">恢复内置 / 重试</button></div>
+        <div class="manual-toolbar"><p id="manual-status" role="status" aria-live="polite">选择章节即可阅读中英文对照手册。</p><div class="manual-pagination" aria-label="手册翻页"><button id="manual-prev" class="btn btn-outline" type="button" aria-label="手册上一页">‹ 上一页</button><label for="manual-page">页码<input id="manual-page" type="number" min="1" step="1" value="1" inputmode="numeric"></label><button id="manual-next" class="btn btn-outline" type="button" aria-label="手册下一页">下一页 ›</button></div></div>
         <div class="manual-grid">
-          <section class="manual-document" aria-labelledby="manual-en-title"><div class="manual-document-heading"><div><span class="eyebrow">ENGLISH</span><h2 id="manual-en-title">英文手册</h2></div><label class="btn btn-outline manual-upload" for="manual-en-file">选择 PDF ↥<input id="manual-en-file" class="visually-hidden" type="file" accept="application/pdf,.pdf"></label></div><div class="manual-view"><div class="manual-empty"><span class="manual-empty-icon" aria-hidden="true">EN</span><h3>导入英文版手册</h3><p>选择本地 PDF 后在此阅读。</p></div><iframe id="manual-en-frame" title="英文装配手册 PDF" src="about:blank"></iframe></div></section>
-          <section class="manual-document" aria-labelledby="manual-zh-title"><div class="manual-document-heading"><div><span class="eyebrow">中文 / CHINESE</span><h2 id="manual-zh-title">中文手册</h2></div><label class="btn btn-outline manual-upload" for="manual-zh-file">选择 PDF ↥<input id="manual-zh-file" class="visually-hidden" type="file" accept="application/pdf,.pdf"></label></div><div class="manual-view"><div class="manual-empty"><span class="manual-empty-icon" aria-hidden="true">中</span><h3>导入中文版手册</h3><p>选择本地 PDF 后在此阅读。</p></div><iframe id="manual-zh-frame" title="中文装配手册 PDF" src="about:blank"></iframe></div></section>
+          <section class="manual-document" aria-labelledby="manual-en-title"><div class="manual-document-heading"><div><span class="eyebrow">ENGLISH</span><h2 id="manual-en-title">英文手册</h2><span id="manual-source-en" class="manual-source">英文原文</span></div><label class="btn btn-outline manual-upload" for="manual-en-file">换用本地 PDF ↥<input id="manual-en-file" class="visually-hidden" type="file" accept="application/pdf,.pdf"></label></div><div class="manual-view"><div class="manual-empty"><span class="manual-empty-icon" aria-hidden="true">EN</span><h3>正在准备英文手册</h3><p>选择上方章节，自动加载对照页。</p></div><iframe id="manual-en-frame" title="英文装配手册 PDF" src="about:blank"></iframe></div></section>
+          <section class="manual-document" aria-labelledby="manual-zh-title"><div class="manual-document-heading"><div><span class="eyebrow">中文 / CHINESE</span><h2 id="manual-zh-title">中文手册</h2><span id="manual-source-zh" class="manual-source">非官方中文译文</span></div><label class="btn btn-outline manual-upload" for="manual-zh-file">换用本地 PDF ↥<input id="manual-zh-file" class="visually-hidden" type="file" accept="application/pdf,.pdf"></label></div><div class="manual-view"><div class="manual-empty"><span class="manual-empty-icon" aria-hidden="true">中</span><h3>正在准备中文手册</h3><p>选择上方章节，自动加载对照页。</p></div><iframe id="manual-zh-frame" title="中文装配手册 PDF" src="about:blank"></iframe></div></section>
         </div>
       </section>
     </div>
