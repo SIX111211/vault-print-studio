@@ -626,6 +626,14 @@ progress { height: 4px; border-radius: 9px; }
 .module-deleted { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 12px; }
 .module-deleted span { overflow-wrap: anywhere; }
 .module-deleted .btn { flex-shrink: 0; }
+.module-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; border: 1px solid var(--orange); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; background: #241b15; }
+.module-batch > span { flex: 1; font-size: 13px; font-weight: 600; }
+.module-batch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.module-batch small { flex-basis: 100%; color: var(--muted); font-size: 11px; }
+.module-batch-check { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid var(--muted); border-radius: 4px; background: var(--bg); color: var(--bg); font-size: 14px; }
+.module-card.is-batch-selected { border-color: var(--orange); background: #302219; box-shadow: inset 0 0 0 1px var(--orange); }
+.module-card.is-batch-selected .module-batch-check { background: var(--orange); border-color: var(--orange); }
+.module-card[role="checkbox"] .module-card-info { padding-right: 18px; }
 .module-cards { display: flex; gap: 10px; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 4px 4px 8px; scroll-padding-inline: 4px; scrollbar-width: thin; overscroll-behavior-x: contain; }
 .module-card { position: relative; flex: 0 0 274px; display: grid; grid-template-columns: 88px minmax(0,1fr); align-items: center; gap: 10px; height: 92px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); text-align: left; }
 .module-card:hover { border-color: var(--muted); }
@@ -640,6 +648,7 @@ progress { height: 4px; border-radius: 9px; }
 .module-card.is-complete { border-color: #436750; background: #17271e; }
 .module-card.is-complete .module-card-state { color: var(--complete); }
 .module-card.is-selected { border-color: var(--orange); box-shadow: inset 0 0 0 1px var(--orange); }
+.module-card[role="checkbox"].is-selected:not(.is-batch-selected) { border-color: var(--line); box-shadow: none; }
 .module-card:focus-visible { outline-offset: 1px; }
 .module-queue-status { min-height: 25px; padding: 0 4px 6px; color: var(--complete); font-size: 11px; }
 #module-next { color: #17120e; }
@@ -661,6 +670,9 @@ progress { height: 4px; border-radius: 9px; }
   #queue-plan-select { flex: 1; width: auto; min-width: 0; }
   .module-queue-actions { width: 100%; justify-content: space-between; }
   .module-queue-actions .btn { min-height: 34px; padding: 6px 9px; font-size: 11px; }
+  .module-batch > span { flex-basis: 100%; white-space: nowrap; }
+  .module-batch-actions { width: 100%; }
+  #module-delete-batch { margin-left: auto; }
   .module-card { flex-basis: 252px; grid-template-columns: 78px minmax(0,1fr); height: 86px; gap: 8px; }
   .module-card-thumb { width: 78px; height: 64px; }
   .module-queue-status { font-size: 10px; }

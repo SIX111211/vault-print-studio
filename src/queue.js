@@ -30,15 +30,27 @@ export function nextIncomplete(state,isComplete){
 }
 
 export function deleteIndependent(state,id){
-  const units=queueUnits(state,null),index=units.findIndex(u=>u.id===id);
-  if(state.queuePlan!==null||index<0)return null;
-  const removed=units[index];state.deletedUnit={unit:structuredClone(removed),index:state.units.indexOf(removed)};
-  state.units=state.units.filter(u=>u.id!==id);
-  state.activeUnit=(units[index+1]||units[index-1])?.id??null;
-  return removed;
+  return deleteIndependents(state,[id])?.[0]??null;
+}
+export function deletionBatch(state){
+  return state.deletedBatch||(state.deletedUnit?{entries:[state.deletedUnit],activeUnit:state.deletedUnit.unit.id}:null);
+}
+export function deleteIndependents(state,requested){
+  const units=queueUnits(state,null),ids=new Set(requested),allowed=new Set(units.map(u=>u.id));
+  // A stale or foreign selection must never partially delete a batch.
+  if(state.queuePlan!==null||!ids.size||[...ids].some(id=>!allowed.has(id)))return null;
+  const entries=state.units.flatMap((unit,index)=>ids.has(unit.id)?[{unit:structuredClone(unit),index}]:[]);
+  const active=state.activeUnit,index=units.findIndex(u=>u.id===active);
+  state.deletedBatch={entries,activeUnit:active};delete state.deletedUnit;
+  state.units=state.units.filter(u=>!ids.has(u.id));
+  if(ids.has(active))state.activeUnit=([...units.slice(index+1),...units.slice(0,index).reverse()].find(u=>!ids.has(u.id)))?.id??null;
+  return entries.map(entry=>entry.unit);
 }
 export function undoIndependentDelete(state){
-  const removed=state.deletedUnit;if(!removed||state.units.length>=200||state.units.some(u=>u.id===removed.unit.id))return null;
-  state.units.splice(Math.min(state.units.length,removed.index),0,removed.unit);
-  state.activeUnit=removed.unit.id;state.queuePlan=null;delete state.deletedUnit;return removed.unit;
+  const batch=deletionBatch(state);if(!batch||state.units.length+batch.entries.length>200)return null;
+  const ids=new Set(batch.entries.map(e=>e.unit.id));if(ids.size!==batch.entries.length||state.units.some(u=>ids.has(u.id)))return null;
+  const units=[...state.units];for(const entry of [...batch.entries].sort((a,b)=>a.index-b.index))units.splice(Math.min(units.length,entry.index),0,entry.unit);
+  state.units=units;state.queuePlan=null;
+  state.activeUnit=queueUnits(state,null).some(u=>u.id===batch.activeUnit)?batch.activeUnit:batch.entries[0].unit.id;
+  delete state.deletedBatch;delete state.deletedUnit;return state.units.find(u=>u.id===state.activeUnit);
 }

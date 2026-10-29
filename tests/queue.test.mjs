@@ -1,11 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {freshState,sanitizeState,setPrinted} from '../src/state.js';
-import {queueUnits,reconcileQueue,selectQueue,selectQueueUnit,nextIncomplete,deleteIndependent,undoIndependentDelete} from '../src/queue.js';
+import {queueUnits,reconcileQueue,selectQueue,selectQueueUnit,nextIncomplete,deleteIndependent,deleteIndependents,deletionBatch,undoIndependentDelete} from '../src/queue.js';
 import {moduleConfig,unitBOM,printProgress,changePlan} from '../src/planner.js';
 import catalog from '../src/catalog.json' with {type:'json'};
 
 const ids=new Set(catalog.map(p=>p.id));
+
+test('noncontiguous batch deletion and reload undo restore order and records without rolling back other edits',()=>{
+  const state=fixture();selectQueueUnit(state,'u9');
+  for(const u of state.units){u.progress.m0010={printed:2,piecesPerFile:2,downloadedAt:'2026-10-29'};u.colors[u.id+':part']='#376680';}
+  const before=structuredClone(state),selected=['u5','u9','u21'];
+  assert.deepEqual(deleteIndependents(state,selected).map(u=>u.id),selected);assert.equal(state.activeUnit,'u10');assert.deepEqual(state.plans,before.plans);
+  assert.deepEqual(state.units,before.units.filter(u=>!selected.includes(u.id)));
+  state.units.find(u=>u.id==='u8').progress.m0010.printed=7;
+  const restored=sanitizeState(JSON.parse(JSON.stringify(state)),ids);assert.equal(deletionBatch(restored).entries.length,3);undoIndependentDelete(restored);
+  assert.deepEqual(restored.units.map(u=>u.id),before.units.map(u=>u.id));assert.equal(restored.activeUnit,'u9');assert.equal(restored.units.find(u=>u.id==='u8').progress.m0010.printed,7);
+  for(const id of selected)assert.deepEqual(restored.units.find(u=>u.id===id),before.units.find(u=>u.id===id));assert.equal(deletionBatch(restored),null);
+});
+test('batch deletion rejects mixed plan or stale IDs atomically and keeps the previous undo',()=>{
+  const state=fixture();selectQueueUnit(state,'u5');deleteIndependents(state,['u6','u7']);const before=structuredClone(state);
+  for(const selection of [[],['u5','u0'],['u5','missing']]){assert.equal(deleteIndependents(state,selection),null);assert.deepEqual(state,before);}
+  state.queuePlan='p1';const planState=structuredClone(state);assert.equal(deleteIndependents(state,['u5']),null);assert.deepEqual(state,planState);
+});
+test('batch undo never partially restores when capacity or duplicate IDs conflict',()=>{
+  const state=fixture();selectQueueUnit(state,'u5');deleteIndependents(state,['u6','u7']);const removed=structuredClone(state.deletedBatch);
+  const template=state.units[0];while(state.units.length<199)state.units.push({...structuredClone(template),id:'extra'+state.units.length});const before=structuredClone(state);
+  assert.equal(undoIndependentDelete(state),null);assert.deepEqual(state,before);
+  state.units=state.units.slice(0,20);state.units.push(structuredClone(removed.entries[0].unit));const collision=structuredClone(state);assert.equal(undoIndependentDelete(state),null);assert.deepEqual(state,collision);
+});
+test('select-all removes only independent modules and legacy single undo migrates',()=>{
+  const state=fixture();selectQueueUnit(state,'u20');const original=structuredClone(state);
+  deleteIndependents(state,queueUnits(state,null).map(u=>u.id));assert.deepEqual(state.units.map(u=>u.id),['u0','u1','u2','u3','u4']);assert.equal(state.activeUnit,null);
+  const restored=sanitizeState(JSON.parse(JSON.stringify(state)),ids);undoIndependentDelete(restored);assert.deepEqual(restored.units,original.units);
+  const legacy=freshState(moduleConfig('drawer','S',3,'1F')),u=structuredClone(legacy.units[0]);legacy.units=[];legacy.activeUnit=null;legacy.deletedUnit={unit:u,index:0};
+  const migrated=sanitizeState(legacy,ids);assert.equal(migrated.deletedUnit,undefined);assert.equal(migrated.deletedBatch.entries.length,1);assert.deepEqual(undoIndependentDelete(migrated),u);
+});
 
 test('independent deletion selects a neighbour and undo survives reload with exact print records',()=>{
   const state=fixture();selectQueueUnit(state,'u20');state.units[20].progress.m0010={printed:1,piecesPerFile:2,downloadedAt:'2026-10-29'};state.units[20].colors.test='#ff6b24';

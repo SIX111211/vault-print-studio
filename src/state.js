@@ -20,7 +20,13 @@ export function sanitizeState(raw,ids){
   if(new Set(plans.map(p=>p.id)).size!==plans.length)throw Error('组合标识重复');
   for(const plan of plans){const problem=validateTiers(plan.tiers,units);if(problem)throw Error(problem);}
   const state={version:1,units,activeUnit:unitIds.has(raw.activeUnit)?raw.activeUnit:raw.activeUnit===null?null:units[0]?.id??null,plans,activePlan:plans.some(p=>p.id===raw.activePlan)?raw.activePlan:plans[0]?.id||null,queuePlan:raw.queuePlan===null?null:plans.some(p=>p.id===raw.queuePlan)?raw.queuePlan:undefined,sound:raw.sound===true,printedGhost:raw.printedGhost!==false};
-  if(raw.deletedUnit){const unit=cleanUnit(raw.deletedUnit.unit);if(!unitIds.has(unit.id))state.deletedUnit={unit,index:Number.isInteger(raw.deletedUnit.index)?Math.max(0,Math.min(200,raw.deletedUnit.index)):units.length};}
+  const deletion=raw.deletedBatch||(raw.deletedUnit?{entries:[raw.deletedUnit],activeUnit:raw.deletedUnit.unit?.id}:null);
+  if(deletion){
+    if(!Array.isArray(deletion.entries)||!deletion.entries.length||deletion.entries.length>200)throw Error('删除记录无效');
+    const entries=deletion.entries.map(e=>({unit:cleanUnit(e.unit),index:Number.isInteger(e.index)?Math.max(0,Math.min(200,e.index)):units.length}));
+    const removedIds=new Set(entries.map(e=>e.unit.id));if(removedIds.size!==entries.length||entries.some(e=>unitIds.has(e.unit.id)))throw Error('删除记录模块标识重复');
+    state.deletedBatch={entries,activeUnit:unitIds.has(deletion.activeUnit)||removedIds.has(deletion.activeUnit)?deletion.activeUnit:entries[0].unit.id};
+  }
   reconcileQueue(state);return state;
 }
 export function validateTiers(tiers,units){

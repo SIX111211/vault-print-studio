@@ -405,3 +405,13 @@ test('delete and undo buttons preserve imported models, handle empty state, and 
   app.run("showTab('library');syncPreferences()");await app.flush();app.node('module-undo-delete').onclick();await app.flush();assert.equal(app.run('unit().progress.m0010.printed'),1);assert.equal(app.node('.workbench').hidden,false);
   app.run("showTab('combine');addTier();finishPlan()");await app.flush();assert.equal(app.node('module-delete').hidden,true);const count=app.run('state.units.length');app.node('module-delete').onclick();assert.equal(app.run('state.units.length'),count);
 });
+
+test('multiselect checks cards without switching the printer, clears on navigation, and deletes as one undo group',async()=>{
+  const app=await appHarness();app.run("var initial=unit().id;addUnit(defaults('drawer'));addUnit(defaults('drawer'));var current=unit().id;matches.set('m0010',{file:new Blob()});render()");await app.flush();
+  app.node('module-multi').onclick();assert.equal(app.run('batchMode'),true);assert.equal(app.node('module-delete-batch').disabled,true);assert.equal(app.node('module-delete').hidden,true);assert.match(app.node('module-cards').innerHTML,/role="checkbox"/);
+  app.node('module-cards').onclick({target:{closest(){return {dataset:{queueUnit:app.run('initial')}};}}});assert.equal(app.run('unit().id'),app.run('current'));assert.equal(app.run('batchSelection.size'),1);
+  app.node('module-select-all').onclick();assert.equal(app.run('batchSelection.size'),3);app.node('module-select-none').onclick();assert.equal(app.run('batchSelection.size'),0);
+  app.node('module-select-all').onclick();app.node('module-delete-batch').onclick();await app.flush();assert.equal(app.run('state.units.length'),0);assert.equal(app.run('state.deletedBatch.entries.length'),3);assert.equal(app.run('matches.size'),1);assert.equal(app.run('batchMode'),false);
+  assert.match(app.node('module-undo-delete').textContent,/3/);app.node('module-undo-delete').onclick();await app.flush();assert.equal(app.run('state.units.length'),3);assert.equal(app.run('unit().id'),app.run('current'));
+  app.node('module-multi').onclick();app.node('module-select-all').onclick();app.run("showTab('combine');addTier();finishPlan()");await app.flush();assert.equal(app.run('batchMode'),false);assert.equal(app.run('batchSelection.size'),0);assert.equal(app.node('module-multi').hidden,true);
+});
