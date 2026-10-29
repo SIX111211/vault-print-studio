@@ -6,10 +6,11 @@ import * as THREE from 'three';
 import {createSourceKey,assembledThumbnailKey,ThumbnailQueue} from '../src/navigation.js';
 import {buildScene} from '../src/assembly.js';
 import {moduleConfig} from '../src/planner.js';
+import {frameCorners,interpolateRigid} from '../src/rigid-preview.js';
 
 // Real THREE geometry/materials and Viewer scene/cache code; no WebGL/browser/server.
 async function harness(){
-  const context=createContext({THREE,frames:{},buildScene,createSourceKey,assembledThumbnailKey,ThumbnailQueue,Blob,performance,URL,
+  const context=createContext({THREE,frames:{},buildScene,createSourceKey,assembledThumbnailKey,ThumbnailQueue,frameCorners,interpolateRigid,Blob,performance,URL,
     matchMedia:()=>({matches:true}),Worker:class{postMessage({key,buffer}){const x=new Uint8Array(buffer)[0]||0;queueMicrotask(()=>this.onmessage({data:{key,resolved:true,parts:[new Float32Array([x,0,0,x+10,0,0,x,20,5])]}}));}}
   });
   let source=await readFile(new URL('../src/viewer.js',import.meta.url),'utf8');

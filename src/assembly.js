@@ -2,6 +2,7 @@ import catalog from './catalog.json' with {type:'json'};
 import frameData from './assembly-data.json' with {type:'json'};
 import orientation from './orientation.json' with {type:'json'};
 import {buildBOM,normalizeConfig} from './rules.js';
+import {fitSustainer} from './sustainer-fit.js';
 const byId=Object.fromEntries(catalog.map(p=>[p.id,p]));
 const MESH_META=byId,ORIENTATION=orientation,ASSEMBLY_V4_DATA=frameData;
 // Frames define source coordinates; no triangle memberships or geometry are bundled.
@@ -735,6 +736,7 @@ export function buildScene(input={},options={}){
  const invalid=bom.rows.filter(r=>!byId[r.id]?.bbox).map(r=>r.id);
  if(invalid.length||!bom.rows.length)return {parts:[],size:[0,0,0],pitch:0,bom,hardware:bom.hardware,errors:bom.errors,missing:[...bom.missing,...invalid],warnings:[...bom.warnings],audit:[],quantityComplete:false,physicalFitVerified:false};
  const builders=createBuilders(config,bom),scene=config.kind==='mods'?builders.mods(config,origin,Math.max(0,explode),progress):builders.module(config,origin,Math.max(0,Math.min(1,open)),Math.max(0,explode),progress);
+ if(config.kind==='sustainer')fitSustainer(scene,config,{origin,open:Math.max(0,Math.min(1,open)),explode:Math.max(0,explode)});
  for(const p of scene.parts){p.matrix=p.cal.matrix;p.role=p.role||bom.rows[p.rowIndex]?.role||'accessory';delete p.source;}
  delete scene.source;
  scene.bom=bom;scene.hardware=bom.hardware;scene.errors=bom.errors;scene.warnings=[...new Set([...bom.warnings,...(scene.unknowns||[])])];scene.needsInput=bom.needsInput;

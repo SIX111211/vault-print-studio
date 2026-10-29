@@ -167,7 +167,7 @@ test('variant metadata does not bypass manual confirmation or turn unknown quant
   const match={manual:true,variant:{piecesPerFile:2,referencePiecesPerFile:1},quantityByUnit:{}},matches=new Map([[runner.id,match]]);
   assert.equal(unitBOM(u,matches).rows.find(r=>r.id===runner.id).qty,null);
   match.quantityByUnit[u.id]={configKey:JSON.stringify(u.config),qty:3};assert.equal(unitBOM(u,matches).rows.find(r=>r.id===runner.id).qty,3);
-  const box={id:'box',config:moduleConfig('sustainer','S',3,'1F'),progress:{},colors:{}},unknown=buildBOM(box.config).rows.find(r=>r.qty===null);
+  const box={id:'box',config:{...moduleConfig('sustainer','S',3,'1F'),lockCount:null},progress:{},colors:{}},unknown=buildBOM(box.config).rows.find(r=>r.qty===null);
   assert.ok(unknown);assert.equal(unitBOM(box,new Map([[unknown.id,{variant:match.variant}]])).rows.find(r=>r.id===unknown.id).qty,null);
 });
 

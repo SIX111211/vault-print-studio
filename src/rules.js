@@ -4,6 +4,9 @@ const CATALOG = catalog;
 const byId = Object.fromEntries(catalog.map(item => [item.id, item]));
 const byOld = new Map(catalog.map(item => [item.old.trim().toLowerCase(), item]));
 const findOld = path => byOld.get(path.trim().toLowerCase());
+// Family and universal facades have one lock seat on S/M, two on L/XL.
+// Each lock uses one holder, inner, outer and complete four-pin STL set.
+const sustainerLockCount = w => ({S:1,M:1,L:2,XL:2})[w];
 const titles={drawer:'抽屉',sustainer:'翻盖箱',mods:'改装配件',trolley:'小推车',base:'底座',wheels:'打印轮组',mobileBase:'双轮底座',casters:'脚轮底座',feet:'支脚',backbone:'背板',moduleConnector:'模块连接件',baseConnector:'底座连接件',pullOutHandle:'伸缩拉手',stationaryHandle:'固定提手',pegboard:'洞洞板连接件',wallMount:'壁挂组件',underTableMount:'桌底安装顶盖',w:'宽度',d:'深度',h:'层高',key:'钥匙类型',roof:'顶盖',rails:'齿条',label:'标签',baseplate:'Gridfinity 底板',handle:'顶部提手',interior:'内腔',facade:'面板',lockCount:'锁扣数量',splitRoofConnectorQty:'顶盖连接件份数',dividers:'分隔板份数',dividerLayout:'分区方式',towerLayers:'抽屉塔层数',form:'底座形式',qty:'文件份数',splitBaseConnectorQty:'底座连接件份数',splitBaseFasteners:'分体底座紧固方案',jig:'装配治具',stopperOuterDiameter:'止动环外径',casterBoltLength:'脚轮螺栓长度',variant:'背板类型',boltLength:'背板螺栓长度',fastenersPerBoard:'每块背板的紧固件数',backboneFastenerQty:'背板紧固件总数',lockMountQty:'锁板紧固件数',lockMountBoltLength:'锁板螺栓长度',lockVariant:'拉手锁座类型',lockQty:'拉手锁座份数',rodLength:'立杆长度',lockBoltThread:'锁紧螺纹',threadsVerified:'螺纹匹配确认',sLockPart2Qty:'S 锁座第二部分份数',backboneConfirmed:'背板配套确认',standard:'洞洞板制式',boardCount:'洞洞板数量',mountingSystem:'固定方式',fastenerQty:'紧固件数量',fastenerSpec:'紧固件规格',moduleFastenerSpec:'模块侧紧固件规格',moduleFastenerQty:'模块侧紧固件数量',wallFastenerSpec:'墙侧紧固件规格',wallFastenerQty:'墙侧紧固件数量',baseplateFitConfirmed:'底板配合确认',drawerBuilder:'宿主抽屉清单',flat:'平底内腔',standardInterior:'标准内腔',sealed:'封闭分区',none:'不添加',whole:'整体',split:'分体',family:'系列配套',universal:'通用',hidden:'隐藏式',both:'两种标签',custom:'自定义',width:'宽度配套',screws:'螺钉',anchors:'锚固件',inserts:'嵌件'};
 const title=key=>typeof key==='string'&&Object.hasOwn(titles,key)?titles[key]:'其他设置';
 const purposes={w:'选择模块宽度代号。',d:'选择网格深度代号。',h:'选择层高；XL 仅提供 1F。',key:'标准式和隐藏式钥匙二选一。',roof:'选择与当前尺寸匹配的顶盖。',rails:'一份文件包含一对齿条，建议配合齿轮钥匙。',label:'按需添加标签片。',baseplate:'按需添加内置 Gridfinity 底板。',handle:'按需添加顶部提手及配套螺栓。',interior:'选择收纳内腔形式。',facade:'系列面板和通用面板二选一。',lockCount:'按面板实际位置确认锁扣数量。',splitRoofConnectorQty:'填写连接分体顶盖所需的文件份数。',dividers:'按自定义分区填写各类分隔板份数。',dividerLayout:'不分区或自行配置分隔板。',towerLayers:'选择 1–6 层；S/M/L 每层 2F，XL 每层 1F。',form:'整体底座与分体底座二选一。',qty:'按完整 STL 文件填写打印份数。',splitBaseConnectorQty:'按分体底座连接位置填写份数。',splitBaseFasteners:'填写分体底座采用的紧固方案。',jig:'治具用于装配定位，完成后取下。',stopperOuterDiameter:'外径按实物选择 30 或 35 毫米。',casterBoltLength:'填写 M8 脚轮固定螺栓的实测长度。',variant:'选择宽度配套背板或通用窄背板。',boltLength:'填写 60–100 毫米范围内的背板螺栓长度。',fastenersPerBoard:'按实际孔位填写每块背板的紧固件数。',backboneFastenerQty:'填写所有选定连接处的背板紧固件总数。',lockMountQty:'填写锁板独立安装的紧固件数量。',lockMountBoltLength:'按穿透厚度填写锁板螺栓长度，单位毫米。',lockVariant:'选择宽度配套锁座或通用锁座。',lockQty:'按两根立杆的实际布局填写通用锁座份数。',rodLength:'填写两根立杆各自采用的长度，单位毫米。',lockBoltThread:'核对实物后选择 M4 或 M6。',threadsVerified:'确认螺栓与嵌件的螺纹配合方案。',sLockPart2Qty:'按实际布局填写 S 锁座第二部分的份数。',backboneConfirmed:'确认已有或另行配齐所需背板。',standard:'选择 IKEA 或 USSA 洞洞板制式。',boardCount:'填写外购洞洞板数量。',mountingSystem:'按安装基材选择固定方式。',fastenerQty:'填写实际安装需要的紧固件数量。',fastenerSpec:'填写经接口核对的紧固件规格。',moduleFastenerSpec:'填写模块侧固定件的规格。',moduleFastenerQty:'填写模块侧固定件的数量。',wallFastenerSpec:'按墙体选择固定件规格。',wallFastenerQty:'填写墙侧固定件的数量。',baseplateFitConfirmed:'确认所选底板与分区内腔无冲突。',drawerBuilder:'检查宿主抽屉清单是否可用。'};
@@ -77,8 +80,7 @@ function buildSustainer(input={}){
  add(r,U+'Hinges/'+low+'.stl',1,'hinge-bottom',"当前方案配套件。",'');
  add(r,U+'Hinges/'+((w==='L'||w==='XL')?'L-XL':w)+' Hinge Top.stl',1,'hinge-top',(w==='L'||w==='XL')?"当前方案配套件。":"当前方案配套件。",'');
  add(r,U+'Rods/'+((w==='L'||w==='XL')?'L-XL':'S-M')+' Rods.stl',1,'hinge-rods',"当前方案配套件。",'');
- const locks=count(r,c,'lockCount',w==='L'?2:undefined);
- if(w==='XL')r.warnings.push('XL 锁扣数量请按所选面板确认。');
+ const locks=count(r,c,'lockCount',sustainerLockCount(w));
  add(r,U+'Locks/LOCK HOLDER.stl',locks,'lock-holder',"当前方案配套件。",'');
  add(r,U+'Locks/LOCK INNER PART.stl',locks,'lock-inner',"当前方案配套件。",'');
  add(r,U+'Locks/LOCK OUTER PART '+(h==='1F'?'1F':'2-4F')+'.stl',locks,'lock-outer',"当前方案配套件。",''+src.cat);
@@ -253,8 +255,8 @@ export function normalizeConfig(input={}) {
  const recognized=kind==='mods'?(requested==='mods'||modificationOptions.some(o=>o.id===requested)):['drawer','sustainer'].includes(kind);
  const base=recognized?defaults(requested):{};
  // Option-id dimensions take precedence over defaults, but not explicit conflicting inputs.
- const result={...base,...(opt?{w:opt.w,d:opt.d,h:opt.h,interior:opt.interior,lockCount:opt.w==='L'?2:undefined}:{}),...input,kind};
- if(kind==='sustainer'&&result.w!=='L'&&input.lockCount===undefined)delete result.lockCount;
+ const result={...base,...(opt?{w:opt.w,d:opt.d,h:opt.h,interior:opt.interior}:{}),...input,kind};
+ if(kind==='sustainer'&&input.lockCount===undefined)result.lockCount=sustainerLockCount(result.w);
  if(input.type!==undefined&&kind==='sustainer'&&input.interior===undefined)result.interior=input.type;
  if(kind==='drawer'&&input.rails===undefined)result.rails=result.key==='standard';
  if(result.d!==undefined)result.d=String(result.d);

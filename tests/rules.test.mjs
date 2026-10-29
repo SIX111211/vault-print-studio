@@ -58,8 +58,8 @@ test('sustainer quantities count paired STL files and hinge motion uses supplied
  const c=defaults('sustainer'),b=buildBOM(c);assert.equal(b.complete,true);assert.ok(!b.rows.some(r=>r.role==='geared-rails'));
  assert.equal(b.rows.find(r=>r.role==='hinge-bottom').qty,1);assert.equal(b.rows.find(r=>r.role==='hinge-rods').qty,1);assert.equal(b.rows.find(r=>r.role==='lock-pins').qty,2);
  const s=buildScene(c),moving=buildScene(c,{origin:[7,8,9],open:.4});checkScene(s);checkScene(moving);assert.equal(s.parts.length,23);
- const lid=moving.parts.find(p=>p.lidGroup);assert.ok(lid.hinge);near(lid.hinge.angle,.4*Math.PI*.55);assert.equal(s.parts.filter(p=>p.id===b.rows.find(r=>r.role==='lock-pins').id).length,8);
- const single=buildBOM({kind:'sustainer',w:'S',d:3,h:'1F'});assert.equal(single.complete,false);assert.ok(single.needsInput.some(n=>n.field==='lockCount'));assert.equal(single.rows.find(r=>r.role==='lock-holder').qty,null);
+ const lid=moving.parts.find(p=>p.lidGroup);assert.ok(lid.hinge);near(lid.hinge.angle,(.4-.2)/.8*Math.PI*.55);assert.equal(s.parts.filter(p=>p.id===b.rows.find(r=>r.role==='lock-pins').id).length,8);
+ const single=buildBOM({kind:'sustainer',w:'S',d:3,h:'1F'});assert.equal(single.complete,true);assert.ok(!single.needsInput.some(n=>n.field==='lockCount'));assert.equal(single.rows.find(r=>r.role==='lock-holder').qty,1);
  const optional=buildBOM({...c,label:'sustainer',baseplate:true});assert.equal(optional.rows.find(r=>r.role==='label').required,false);assert.ok(optional.rows.filter(r=>r.role==='baseplate').every(r=>!r.required));
 });
 

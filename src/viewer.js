@@ -4,6 +4,7 @@ import frames from './assembly-data.json' with {type:'json'};
 import {separateRectangles,easeInOut} from './viewer-layout.js';
 import {buildScene} from './assembly.js';
 import {createSourceKey,assembledThumbnailKey,ThumbnailQueue} from './navigation.js';
+import {frameCorners,interpolateRigid} from './rigid-preview.js';
 
 const worker=new Worker(new URL('./mesh-worker.js',import.meta.url),{type:'module'});
 const pending=new Map(),cache=new Map(),pins=new Map(),viewers=new Set();let sequence=0,epoch=0,tail=Promise.resolve();
@@ -60,7 +61,7 @@ export class Viewer {
   }
   tick(){
     if(!this.canvas.getClientRects().length)return;const now=performance.now();let moving=false;
-    for(const m of this.meshes){const motion=m.userData.motion;if(motion){const t=reduced.matches?1:Math.min(1,(now-motion.start)/motion.duration),a=easeInOut(t);m.position.lerpVectors(motion.position,m.userData.target.position,a);m.quaternion.slerpQuaternions(motion.quaternion,m.userData.target.quaternion,a);if(t===1)m.userData.motion=null;else moving=true;}
+    for(const m of this.meshes){const motion=m.userData.motion;if(motion){const t=reduced.matches?1:Math.min(1,(now-motion.start)/motion.duration),a=easeInOut(t);interpolateRigid(motion,m.userData.target,m.geometry.boundingSphere.center,a,m.position,m.quaternion);if(t===1)m.userData.motion=null;else moving=true;}
       const opacity=m.userData.opacityTarget??1;const fade=m.userData.fadeStart;if(fade!==undefined){const a=reduced.matches?1:Math.min(1,(now-fade)/500);m.material.opacity=opacity*a;if(a===1)delete m.userData.fadeStart;else moving=true;}else m.material.opacity+=(opacity-m.material.opacity)*.2;
     }
     if(this.cameraMotion){const c=this.cameraMotion,t=reduced.matches?1:Math.min(1,(now-c.start)/650),a=easeInOut(t);this.camera.position.lerpVectors(c.from,c.to,a);this.controls.target.lerpVectors(c.fromTarget,c.toTarget,a);if(t===1)this.cameraMotion=null;else moving=true;}
@@ -118,7 +119,8 @@ export class Viewer {
     for(const m of this.meshes){if(immediate){m.position.copy(m.userData.target.position);m.quaternion.copy(m.userData.target.quaternion);m.userData.motion=null;}else this.startMotion(m);m.updateMatrixWorld();}
   }
   startMotion(m){m.userData.motion={position:m.position.clone(),quaternion:m.quaternion.clone(),start:performance.now(),duration:720};}
-  targetBox(m){const matrix=new THREE.Matrix4().compose(m.userData.target.position,m.userData.target.quaternion,new THREE.Vector3(1,1,1));return m.geometry.boundingBox.clone().applyMatrix4(matrix);}
+  sourceCorners(m){if(this.mode!=='flat'&&!m.userData.unresolved)return frameCorners(m.userData.cal);const b=m.geometry.boundingBox;return Array.from({length:8},(_,i)=>new THREE.Vector3(i&1?b.max.x:b.min.x,i&2?b.max.y:b.min.y,i&4?b.max.z:b.min.z));}
+  targetBox(m){const matrix=new THREE.Matrix4().compose(m.userData.target.position,m.userData.target.quaternion,new THREE.Vector3(1,1,1));return new THREE.Box3().setFromPoints(this.sourceCorners(m).map(v=>v.applyMatrix4(matrix)));}
   spaceExploded(){
     const right=new THREE.Vector3(1,0,0).applyQuaternion(this.camera.quaternion),up=new THREE.Vector3(0,1,0).applyQuaternion(this.camera.quaternion);
     const rectangles=this.meshes.map(m=>{const b=this.targetBox(m),xs=[],ys=[];for(let i=0;i<8;i++){const v=new THREE.Vector3(i&1?b.max.x:b.min.x,i&2?b.max.y:b.min.y,i&4?b.max.z:b.min.z);xs.push(v.dot(right));ys.push(v.dot(up));}return {key:m.userData.key,x:(Math.max(...xs)+Math.min(...xs))/2,y:(Math.max(...ys)+Math.min(...ys))/2,width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys)};});
@@ -130,9 +132,9 @@ export class Viewer {
   }
   fit({animate=true,preserveDirection=false}={}){if(!this.meshes.length)return;const box=new THREE.Box3();for(const m of this.meshes)box.union(this.targetBox(m));const center=box.getCenter(new THREE.Vector3());const direction=preserveDirection?this.camera.position.clone().sub(this.controls.target).normalize():new THREE.Vector3(1,1,.85).normalize();
     const right=new THREE.Vector3().crossVectors(this.camera.up,direction).normalize(),up=new THREE.Vector3().crossVectors(direction,right),tan=Math.tan(THREE.MathUtils.degToRad(this.camera.fov/2));let radius=20;
-    for(const mesh of this.meshes){const b=mesh.geometry.boundingBox,matrix=new THREE.Matrix4().compose(mesh.userData.target.position,mesh.userData.target.quaternion,new THREE.Vector3(1,1,1));for(let i=0;i<8;i++){const v=new THREE.Vector3(i&1?b.max.x:b.min.x,i&2?b.max.y:b.min.y,i&4?b.max.z:b.min.z).applyMatrix4(matrix).sub(center),z=v.dot(direction);radius=Math.max(radius,z+Math.abs(v.dot(up))/tan,z+Math.abs(v.dot(right))/(tan*this.camera.aspect));}}
+    for(const mesh of this.meshes){const matrix=new THREE.Matrix4().compose(mesh.userData.target.position,mesh.userData.target.quaternion,new THREE.Vector3(1,1,1));for(const corner of this.sourceCorners(mesh)){const v=corner.applyMatrix4(matrix).sub(center),z=v.dot(direction);radius=Math.max(radius,z+Math.abs(v.dot(up))/tan,z+Math.abs(v.dot(right))/(tan*this.camera.aspect));}}
     radius*=1.12;const to=center.clone().addScaledVector(direction,radius);if(animate&&!reduced.matches)this.cameraMotion={from:this.camera.position.clone(),to,fromTarget:this.controls.target.clone(),toTarget:center,start:performance.now()};else{this.cameraMotion=null;this.controls.target.copy(center);this.camera.position.copy(to);}this.camera.near=Math.max(.1,radius/1000);this.camera.far=radius*30;this.camera.updateProjectionMatrix();this.controls.update();}
-  updateOutline(){if(!this.outline)return;this.outline.box.makeEmpty();for(const m of this.meshes)if(this.selectedKeys.has(m.userData.key)){m.updateMatrixWorld();this.outline.box.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld));}}
+  updateOutline(){if(!this.outline)return;this.outline.box.makeEmpty();for(const m of this.meshes)if(this.selectedKeys.has(m.userData.key)){m.updateMatrixWorld();for(const v of this.sourceCorners(m))this.outline.box.expandByPoint(v.applyMatrix4(m.matrixWorld));}}
   select(key){this.selected=key;this.selectKeys(key?[key]:[]);}
   selectGroup(instance){this.selectKeys(this.meshes.filter(m=>m.userData.instance===instance).map(m=>m.userData.key));}
   selectKeys(keys){this.selectedKeys=new Set(keys);if(this.outline){this.scene.remove(this.outline);this.outline.geometry.dispose();this.outline.material.dispose();this.outline=null;}for(const m of this.meshes){const selected=this.selectedKeys.has(m.userData.key);m.material.emissive.set(selected?0xff6b20:0x000000);m.material.emissiveIntensity=selected?.65:0;}if(this.meshes.some(m=>this.selectedKeys.has(m.userData.key))){this.outline=new THREE.Box3Helper(new THREE.Box3(),0xff702e);this.scene.add(this.outline);this.updateOutline();}this.canvas.style.cursor=keys.length?'pointer':'grab';}
