@@ -8,7 +8,7 @@ import manualBooks from '../src/manual-library.json' with {type:'json'};
 
 // Read-only release audit. Does not run Git mutations, upload, or copy files.
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const ROOT_FILES = new Set(['index.html', 'package.json', 'package-lock.json', 'vite.config.js', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', '.gitignore']);
+const ROOT_FILES = new Set(['index.html', 'package.json', 'package-lock.json', 'vite.config.js', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', '.gitignore', '.gitattributes']);
 const ROOT_DIRS = new Set(['.github', 'scripts', 'src', 'tests']);
 const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.json', '.html', '.css', '.md', '.yml', '.yaml']);
 const ASSET_EXTENSIONS = new Set(('.stl .obj .3mf .ply .off .dae .fbx .blend .step .stp .iges .igs .gcode .glb .gltf .bin .wasm .pdf .png .jpg .jpeg .webp .gif .avif .svg .ico .bmp .tif .tiff .psd .ai .eps .exr .hdr .mp4 .webm .mov .avi .mp3 .wav .ogg .flac .woff .woff2 .ttf .otf .eot .zip .gz .tgz .tar .bz2 .xz .br .7z .rar .zst .doc .docx .ppt .pptx .xls .xlsx .map').split(' '));
