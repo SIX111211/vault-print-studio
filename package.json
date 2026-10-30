@@ -1,6 +1,6 @@
 {
   "name": "vault-print-studio",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "description": "Local-first, unofficial VAULT print planner. Bring your own licensed models.",

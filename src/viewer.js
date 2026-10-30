@@ -61,6 +61,14 @@ export class Viewer {
   }
   tick(){
     if(!this.canvas.getClientRects().length)return;const now=performance.now();let moving=false;
+    const operation=this.operation;
+    if(operation){
+      const t=reduced.matches?1:Math.min(1,(now-operation.start)/operation.duration);
+      operation.value=operation.from+(operation.to-operation.from)*easeInOut(t);
+      const parts=new Map(operation.at(operation.value).parts.map(p=>[p.key||`${p.id}:${p.copy||0}:${p.component||0}`,p]));
+      for(const m of this.meshes){const p=parts.get(m.userData.key);if(!p||m.userData.unresolved)continue;Object.assign(m.userData,p);const matrix=matrixFor(p);matrix.decompose(m.position,m.quaternion,new THREE.Vector3());m.userData.motion=null;}
+      if(t===1)this.operation=null;else moving=true;
+    }
     for(const m of this.meshes){const motion=m.userData.motion;if(motion){const t=reduced.matches?1:Math.min(1,(now-motion.start)/motion.duration),a=easeInOut(t);interpolateRigid(motion,m.userData.target,m.geometry.boundingSphere.center,a,m.position,m.quaternion);if(t===1)m.userData.motion=null;else moving=true;}
       const opacity=m.userData.opacityTarget??1;const fade=m.userData.fadeStart;if(fade!==undefined){const a=reduced.matches?1:Math.min(1,(now-fade)/500);m.material.opacity=opacity*a;if(a===1)delete m.userData.fadeStart;else moving=true;}else m.material.opacity+=(opacity-m.material.opacity)*.2;
     }
@@ -68,6 +76,7 @@ export class Viewer {
     this.canvas.dataset.animating=String(moving);this.controls.update();this.updateOutline();this.renderer.render(this.scene,this.camera);
   }
   async setScene(scene,matches,{mode=this.mode,fit=true,animate=true,colors={},raw=false}={}){
+    this.operation=null;
     const ticket=++this.ticket;this.mode=mode;this.descriptors=scene.parts||[];
     this.canvas.setAttribute('aria-busy','true');this.canvas.dataset.modelCount='0';
     this.onStatus('正在读取本地模型…');
@@ -126,9 +135,27 @@ export class Viewer {
     const rectangles=this.meshes.map(m=>{const b=this.targetBox(m),xs=[],ys=[];for(let i=0;i<8;i++){const v=new THREE.Vector3(i&1?b.max.x:b.min.x,i&2?b.max.y:b.min.y,i&4?b.max.z:b.min.z);xs.push(v.dot(right));ys.push(v.dot(up));}return {key:m.userData.key,x:(Math.max(...xs)+Math.min(...xs))/2,y:(Math.max(...ys)+Math.min(...ys))/2,width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys)};});
     const offsets=separateRectangles(rectangles,12);for(const m of this.meshes){const d=offsets.get(m.userData.key);m.userData.target.position.addScaledVector(right,d.x).addScaledVector(up,d.y);}
   }
-  update(scene,mode=this.mode){
+  update(scene,mode=this.mode,{operation=null}={}){
+    const from=this.operation?.value??operation?.from;this.operation=null;
     const byKey=new Map((scene.parts||[]).map(p=>[p.key||`${p.id}:${p.copy||0}:${p.component||0}`,p]));
     const changed=mode!==this.mode;for(const m of this.meshes){const p=byKey.get(m.userData.key);if(p)Object.assign(m.userData,p);}this.layout(mode);if(changed)this.fit({animate:true,preserveDirection:true});
+    // Opening is an articulated mechanism, not a straight-line mesh transition.
+    // Keep the final targets for camera framing, but sample the actual joints
+    // each frame. Reversing uses the current amount, not the previous endpoint.
+    if(operation&&mode==='assembled'&&!changed&&!reduced.matches){
+      this.operation={...operation,from,value:from,start:performance.now(),duration:1100*Math.max(.15,Math.abs(operation.to-from))};
+      for(const m of this.meshes)if(!m.userData.unresolved)m.userData.motion=null;
+    }else if(operation&&reduced.matches)this.layout(mode,true);
+  }
+  fitIfNeeded(){
+    this.camera.updateMatrixWorld();
+    for(const m of this.meshes){
+      const matrix=new THREE.Matrix4().compose(m.userData.target.position,m.userData.target.quaternion,new THREE.Vector3(1,1,1));
+      if(this.sourceCorners(m).some(v=>{v.applyMatrix4(matrix).project(this.camera);return Math.abs(v.x)>.94||Math.abs(v.y)>.94||v.z< -1||v.z>1;})){
+        this.fit({animate:true,preserveDirection:true});return true;
+      }
+    }
+    return false;
   }
   fit({animate=true,preserveDirection=false}={}){if(!this.meshes.length)return;const box=new THREE.Box3();for(const m of this.meshes)box.union(this.targetBox(m));const center=box.getCenter(new THREE.Vector3());const direction=preserveDirection?this.camera.position.clone().sub(this.controls.target).normalize():new THREE.Vector3(1,1,.85).normalize();
     const right=new THREE.Vector3().crossVectors(this.camera.up,direction).normalize(),up=new THREE.Vector3().crossVectors(direction,right),tan=Math.tan(THREE.MathUtils.degToRad(this.camera.fov/2));let radius=20;
@@ -141,7 +168,7 @@ export class Viewer {
   setPrintedState(statuses={}, {ghost=true}={}){this.printStates=statuses;this.ghostPrinted=ghost;let done=0;for(const m of this.meshes){const status=statuses[m.userData.key]||{},finished=!!status.done;done+=Number(finished);m.userData.printStatus=status;m.userData.opacityTarget=finished&&ghost?.26:1;m.material.transparent=finished&&ghost||m.userData.fadeStart!==undefined;m.material.depthWrite=!finished||!ghost;m.material.color.copy(m.userData.originalColor||new THREE.Color(.7,.7,.7));if(finished)m.material.color.lerp(new THREE.Color('#82909a'),.85);else if(status.partial)m.material.color.lerp(new THREE.Color('#ff9a40'),.3);m.material.needsUpdate=true;}this.canvas.dataset.printedCount=String(done);}
   color(key,color){const m=this.meshes.find(m=>m.userData.key===key);if(m){m.userData.originalColor=new THREE.Color(color);m.userData.baseColor=color;this.setPrintedState(this.printStates,{ghost:this.ghostPrinted});}}
   capture(){this.renderer.render(this.scene,this.camera);return this.canvas.toDataURL('image/webp',.75);}
-  clear(){this.ticket++;this.select(null);pin(this.pinned,-1);this.pinned=[];for(const m of this.meshes)m.material.dispose();for(const m of this.rods||[]){m.geometry.dispose();m.material.dispose();}this.meshes=[];this.rods=[];this.group.clear();this.canvas.dataset.modelCount='0';this.canvas.setAttribute('aria-busy','false');}
+  clear(){this.ticket++;this.operation=null;this.select(null);pin(this.pinned,-1);this.pinned=[];for(const m of this.meshes)m.material.dispose();for(const m of this.rods||[]){m.geometry.dispose();m.material.dispose();}this.meshes=[];this.rods=[];this.group.clear();this.canvas.dataset.modelCount='0';this.canvas.setAttribute('aria-busy','false');}
   dispose(){this.clear();viewers.delete(this);this.resize.disconnect();cancelAnimationFrame(this.resizeFrame);this.renderer.setAnimationLoop(null);this.controls.dispose();this.renderer.dispose();trimCache();}
 }
 

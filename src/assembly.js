@@ -3,6 +3,7 @@ import frameData from './assembly-data.json' with {type:'json'};
 import orientation from './orientation.json' with {type:'json'};
 import {buildBOM,normalizeConfig} from './rules.js';
 import {fitSustainer} from './sustainer-fit.js';
+import {fitDrawer} from './drawer-fit.js';
 const byId=Object.fromEntries(catalog.map(p=>[p.id,p]));
 const MESH_META=byId,ORIENTATION=orientation,ASSEMBLY_V4_DATA=frameData;
 // Frames define source coordinates; no triangle memberships or geometry are bundled.
@@ -91,7 +92,7 @@ function baseSceneForModule(c,origin=[0,0,0],open=0,explode=0,progress=Infinity)
   const row=rows[rowIndex],item=row.item,n=item.name,path=item.old,count=v4Data(item.id)?.length||1;
   if(!Number.isInteger(row.qty)||row.qty<=0)continue;
   for(let copy=0;copy<row.qty;copy++)for(let comp=0;comp<count;comp++){
-   let kind='raw',axes=I3;if(/\/Modules\//.test(path))kind='shell';else if(/\/Boxes\//.test(path)&&/ Box /.test(n))kind=c.w==='XL'?'xlbox':'box';else if(/\/Facades\//.test(path)||(/Facade/.test(n)&&!/Cap/.test(n)))kind='facade';else if(/\/Roofs\//.test(path))kind='roof';else if(/Baseplate/.test(n))kind=c.w==='XL'?'xlplate':'plate';
+   let kind='raw',axes=I3;if(/\/Modules\//.test(path))kind='shell';else if(/\/Boxes\//.test(path)&&/ Box /.test(n))kind=c.w==='XL'?'xlbox':'box';else if(/\/Facades\//.test(path)||(/Facade/.test(n)&&!/Cap/.test(n)))kind='facade';else if(isS?row.role==='roof':/\/Roofs\//.test(path))kind='roof';else if(/Baseplate/.test(n))kind=c.w==='XL'?'xlplate':'plate';
    let p=v4Part(row,copy,comp,kind,kind==='raw'?axes:null),s=p.cal.size;
    const frame=a=>{p.cal=v4Frame(item.id,comp,a);s=p.cal.size;return p};
    if(!main){p.evidence='unplaced';p.reason='缺少外壳定位基准，零件暂放待装区。'}
@@ -737,7 +738,17 @@ export function buildScene(input={},options={}){
  if(invalid.length||!bom.rows.length)return {parts:[],size:[0,0,0],pitch:0,bom,hardware:bom.hardware,errors:bom.errors,missing:[...bom.missing,...invalid],warnings:[...bom.warnings],audit:[],quantityComplete:false,physicalFitVerified:false};
  const builders=createBuilders(config,bom),scene=config.kind==='mods'?builders.mods(config,origin,Math.max(0,explode),progress):builders.module(config,origin,Math.max(0,Math.min(1,open)),Math.max(0,explode),progress);
  if(config.kind==='sustainer')fitSustainer(scene,config,{origin,open:Math.max(0,Math.min(1,open)),explode:Math.max(0,explode)});
+ for(const p of scene.parts)p.role=p.role||bom.rows[p.rowIndex]?.role||'accessory';
+ if(config.kind==='drawer')fitDrawer(scene,config,{origin,open:Math.max(0,Math.min(1,open)),explode:Math.max(0,explode)});
  for(const p of scene.parts){p.matrix=p.cal.matrix;p.role=p.role||bom.rows[p.rowIndex]?.role||'accessory';delete p.source;}
+ if(config.kind==='sustainer'){
+  // Summarize final fitted poses, not the preliminary placement pass.
+  scene.audit=scene.audit.map(a=>{const ps=scene.parts.filter(p=>p.id===a.id);return {...a,inferred:ps.filter(p=>p.evidence==='inferred').length,unplaced:ps.filter(p=>p.evidence==='unplaced').length};});
+  scene.unplaced=bom.rows.filter(r=>scene.parts.some(p=>p.id===r.id&&p.evidence==='unplaced')||!Number.isInteger(r.qty)||r.qty<=0).map(r=>({...r,item:byId[r.id]}));
+  const pending=scene.audit.filter(a=>a.unplaced||a.expected===null).map(a=>a.name+'：'+(a.expected===null?'数量需按当前安装布局确认。':'安装位置待确认，零件保留在待装区。'));
+  scene.unknowns=[...pending,...(scene.missing||[]),...(scene.fitWarnings||[])];
+  scene.fitWarnings=[...(scene.fitWarnings||[]),...pending];
+ }
  delete scene.source;
  scene.bom=bom;scene.hardware=bom.hardware;scene.errors=bom.errors;scene.warnings=[...new Set([...bom.warnings,...(scene.unknowns||[])])];scene.needsInput=bom.needsInput;
  scene.quantityComplete=!!scene.quantityComplete&&bom.complete;scene.physicalFitVerified=false;

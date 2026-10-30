@@ -1,5 +1,6 @@
 import front from './sustainer-front-data.json' with {type:'json'};
 import bodyData from './sustainer-body-data.json' with {type:'json'};
+import connectors from './sustainer-connector-data.json' with {type:'json'};
 
 const I=[[1,0,0],[0,1,0],[0,0,1]],TURN=[[-1,0,0],[0,-1,0],[0,0,1]];
 const mv=(r,p)=>r.map(row=>row.reduce((s,v,j)=>s+v*p[j],0));
@@ -36,7 +37,7 @@ export function fitSustainerFront(scene,c,{origin=[0,0,0],open=0,explode=0}={}){
  for(const p of scene.parts){
   const cal=front.locks[p.id]||(p.id==='m0574'?front.pins[p.component]:null);if(!cal)continue;
   const x=centers[p.copy];
-  if(x===undefined){p.position=[W+80+origin[0],p.rowIndex*75+origin[1],origin[2]];p.move=[0,0,0];delete p.hinge;p.evidence='unplaced';p.reason='额外锁扣没有对应面板孔位，保留在待装区。';continue;}
+  if(x===undefined){placeSustainerPart(p,cal,[W+80,0,0],origin);p.move=[0,0,0];delete p.hinge;delete p.lidGroup;p.evidence='unplaced';p.fitSustainer.status='unresolved-mount';p.reason='额外锁扣没有对应面板孔位，保留在待装区。';continue;}
   const small=[x,D+10.2001,facadeZ+topZ-1.8003],big=[x,small[1],small[2]-15.0015];
   const pivot=small.map((v,j)=>v+origin[j]);
   if(p.id==='m0575'){
@@ -60,6 +61,12 @@ export function fitSustainerFront(scene,c,{origin=[0,0,0],open=0,explode=0}={}){
   }
  }
  scene.frontLocks={centers,sets:centers.length,pinsPerSet:4,facadeZ,physicalFitVerified:false};
+ let trayX=W+80,trayY=0,columnWidth=0;
+ for(const p of scene.parts.filter(p=>p.evidence==='unplaced')){
+  if(trayY&&trayY+p.cal.size[1]>Math.max(D,220)){trayX+=columnWidth+25;trayY=0;columnWidth=0;}
+  p.position=[trayX+origin[0],trayY+origin[1],origin[2]];trayY+=p.cal.size[1]+25;columnWidth=Math.max(columnWidth,p.cal.size[0]);
+  p.move=[0,0,0];delete p.hinge;delete p.lidGroup;
+ }
  return scene;
 }
 
@@ -81,6 +88,17 @@ export function fitSustainer(scene,c,options={}){
   }
   p.fitSustainer={...p.fitSustainer,mountMaxResidual:pose.mountMaxResidual??null};
   p.reason=pose.role==='body'?'箱体保持源模型尺寸。':pose.role==='roof'?'顶盖与上铰链按安装孔固定，共用后部转轴。':pose.role==='hinge-rods'?'两根铰链销轴按轴孔定位，保留原始打印形状。':'铰链叶片按箱体和顶盖的安装孔定位。';
+ }
+ for(const p of scene.parts){
+  const record=connectors[p.id];if(!record)continue;
+  const roof=plan.parts.find(q=>q.id===record.roofPart1Id),site=record.sites[p.copy];
+  placeSustainerPart(p,record.cal,roof&&site?site.map((v,j)=>v+roof.position[j]):[scene.size[0]+80,0,0],origin);
+  if(!roof||!site){p.evidence='unplaced';p.fitSustainer.status='unresolved-mount';p.reason='此连接件份数超过测得槽位，额外零件保留在待装区。';delete p.hinge;delete p.lidGroup;continue;}
+  p.kind='connector';p.step=7;p.explodeVector=[0,0,160];
+  const enter=Math.max(0,Math.min(1,p.step-scene.progress)),ease=enter*enter*(3-2*enter);
+  p.move=p.explodeVector.map(v=>v*(explode+ease));p.move[2]+=Math.max(0,Math.min(1,7-scene.progress))*70;
+  p.lidGroup=true;p.hinge={pivot:plan.hinge.pivot.map((v,j)=>v+origin[j]),angle:Math.max(0,(open-.2)/.8)*Math.PI*.55};
+  p.fitSustainer.status='source-pocket-aligned';p.reason='分体盖连接件按两半盖的配合槽定位，随盖组件绕共同转轴运动；保持你确认的打印份数。';
  }
  scene.fitWarnings=[];
  if(plan.status==='source-interface-mismatch'){

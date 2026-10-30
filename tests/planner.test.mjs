@@ -9,6 +9,7 @@ import books from '../src/manual-library.json' with {type:'json'};
 import catalog from '../src/catalog.json' with {type:'json'};
 import {buildBOM,defaults,configurationOptions} from '../src/rules.js';
 import {buildScene,componentFrames} from '../src/assembly.js';
+import {buildComposition} from '../src/composition.js';
 import {patterns,moduleConfig,configProblem,layerConfigs,layerChoices,changePlan,unitBOM,effectiveProgress,printProgress,printedState,libraryRows,validateManualPDF} from '../src/planner.js';
 
 const makeUnit=(id,w='L',d=3,h='1F')=>({id,name:id,config:moduleConfig('drawer',w,d,h),progress:{},colors:{}});
@@ -215,6 +216,7 @@ async function appHarness({pdfFactory}={}){
     setPrintedState(status,options){this.printedCalls.push({status,options});}
     selectKeys(keys){this.selectedKeys=keys;}
     fit(){this.fits=(this.fits||0)+1;}
+    fitIfNeeded(){this.frameChecks=(this.frameChecks||0)+1;}
     select(){}
     clear(){}
   }
@@ -227,7 +229,7 @@ async function appHarness({pdfFactory}={}){
     }};pdfDocs.push(doc);
     return {promise:Promise.resolve(doc),destroy:()=>doc.destroy()};
   };
-  const context=createContext({books,AbortController,bundledManual:async()=>{throw Error("offline test");},initUpdates(){},workspaceRecovery:()=>({prepare(){},resume(){},invalidate(){}}),...stateAPI,...plannerAPI,...queueAPI,catalog,buildBOM,defaults,configurationOptions,buildScene,componentFrames,Viewer:FakeViewer,crypto,structuredClone,Blob,clearGeometry(){},clearThumbnails(){},scanFiles(){},thumbnail(){return Promise.reject(Error('Invalid geometry'));},moduleThumbnail(){return Promise.resolve({url:'data:image/webp;base64,test',missing:0,unresolved:false});},
+  const context=createContext({books,AbortController,bundledManual:async()=>{throw Error("offline test");},initUpdates(){},workspaceRecovery:()=>({prepare(){},resume(){},invalidate(){}}),...stateAPI,...plannerAPI,...queueAPI,catalog,buildBOM,defaults,configurationOptions,buildScene,buildComposition,componentFrames,Viewer:FakeViewer,crypto,structuredClone,Blob,clearGeometry(){},clearThumbnails(){},scanFiles(){},thumbnail(){return Promise.reject(Error('Invalid geometry'));},moduleThumbnail(){return Promise.resolve({url:'data:image/webp;base64,test',missing:0,unresolved:false});},
     getDocument,GlobalWorkerOptions:{},pdfWorkerURL:'/assets/pdf.worker.min.mjs',
     requestAnimationFrame(fn){fn();},document:{getElementById:node,querySelector:node,createElement:tag=>node(tag+'-'+(++canvasId)),querySelectorAll(){return [];},addEventListener(k,fn){listeners[k]=fn;}},window:{devicePixelRatio:3,addEventListener(){}},IntersectionObserver:class{constructor(callback){this.callback=callback;}observe(){}unobserve(){}disconnect(){}},ResizeObserver:class{constructor(callback){this.callback=callback;}observe(){}disconnect(){this.disconnected=true;}},localStorage:{getItem(){return null;},setItem(){}},URL:{createObjectURL(){return 'blob:local-'+(++urlIndex);},revokeObjectURL(url){revoked.push(url);}},setTimeout(fn){const id=++timerId;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);},clearInterval(){}});
   const manualSource=(await readFile(new URL('../src/manual-viewer.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'').replace('export class LocalManualViewer','class LocalManualViewer');runInContext(manualSource,context);
