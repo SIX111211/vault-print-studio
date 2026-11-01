@@ -37,10 +37,10 @@
           <button id="choose-folder" class="btn btn-primary btn-large" type="button">选择模型文件夹 <span aria-hidden="true">↗</span></button>
           <button id="choose-files" class="btn btn-text" type="button">或选择 STL 文件 <span aria-hidden="true">＋</span></button>
         </div>
-        <input id="folder-input" class="visually-hidden" type="file" webkitdirectory multiple accept=".stl" tabindex="-1" aria-label="选择 STL 模型文件夹">
+        <input id="folder-input" class="visually-hidden" type="file" webkitdirectory directory multiple tabindex="-1" aria-label="选择 STL 模型文件夹">
         <input id="files-input" class="visually-hidden" type="file" multiple accept=".stl" tabindex="-1" aria-label="选择 STL 模型文件">
         <div id="import-feedback" class="import-feedback">
-          <p id="import-status" class="import-status" role="status" aria-live="polite">支持中英文文件名；导入后核对缺失项与匹配冲突。</p>
+          <p id="import-status" class="import-status" role="status" aria-live="polite">支持选择或拖入模型总文件夹（含子目录），也可多选 STL；中英文命名均按内容识别。</p>
           <progress id="import-progress" max="100" value="0" aria-label="模型导入进度"></progress>
         </div>
         <p class="local-promise"><span class="status-dot" aria-hidden="true"></span>本地文件留在你的设备上</p>

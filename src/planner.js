@@ -1,6 +1,8 @@
 import {buildBOM,defaults,configurationOptions} from './rules.js';
 import {validateTiers} from './state.js';
 import frameData from './assembly-data.json' with {type:'json'};
+import {tierColumns,withColumns} from './drawer-layout.js';
+import {compositionProblem} from './composition.js';
 
 export const patterns=[['S',['S']],['M',['M']],['L',['L']],['XL',['XL']],['SS',['S','S']],['SM',['S','M']]];
 export function moduleConfig(kind,w,d,h){
@@ -13,10 +15,10 @@ export function configProblem(config){
   const b=buildBOM(config);
   return [...b.errors,...b.missing][0]||(!b.rows.length?'目录中没有此配置':'');
 }
-export function layerConfigs({kind,pattern,d,h}){
+export function layerConfigs({kind,pattern,d,h,rightKind=kind,rightHeight=h}){
   const ws=patterns.find(([id])=>id===pattern)?.[1];
   if(!ws||!['drawer','sustainer'].includes(kind))return [];
-  const cs=ws.map(w=>moduleConfig(kind,w,d,h));
+ const cs=ws.map((w,i)=>moduleConfig(i?rightKind:kind,w,d,i?rightHeight:h));
   return cs.some(configProblem)?[]:cs;
 }
 export function layerChoices(kind,pattern){
@@ -24,7 +26,7 @@ export function layerChoices(kind,pattern){
 }
 // All operations return new containers; rejected changes never touch progress or the plan.
 export function changePlan(plan,units,operation){
-  const tiers=plan.tiers.map(t=>({...t,ids:[...t.ids]}));let nextUnits=units.slice();
+ const tiers=plan.tiers.map(t=>({...t,ids:[...t.ids],...(t.columns?{columns:t.columns.map(c=>c.slice())}:{})}));let nextUnits=units.slice();
   const i=operation.index;
   if(operation.type==='insert'){
     if(!Number.isInteger(i)||i<0||i>tiers.length)return {error:'插入位置无效'};
@@ -35,12 +37,24 @@ export function changePlan(plan,units,operation){
     else if(operation.type==='move'){
       if(!Number.isInteger(operation.to)||operation.to<0||operation.to>=tiers.length)return {error:'已到达组合边界'};
       const [tier]=tiers.splice(i,1);tiers.splice(operation.to,0,tier);
+    }else if(operation.type==='insert-column'){
+      const columns=tierColumns(tiers[i]).map(c=>c.slice()),col=columns[operation.column];
+      if(!col||!Number.isInteger(operation.at)||operation.at<0||operation.at>col.length||!operation.unit)return {error:'独立列插入位置无效'};
+      nextUnits.push(operation.unit);col.splice(operation.at,0,operation.unit.id);tiers[i]=withColumns(tiers[i],columns);
+    }else if(operation.type==='remove-unit'){
+      const columns=tierColumns(tiers[i]).map(col=>col.filter(id=>id!==operation.id));
+      if(!tiers[i].ids.includes(operation.id))return {error:'模块不在此组合中'};
+      if(columns.some(c=>!c.length))return {error:'此列至少保留一个模块；可用“删除整组”移除。'};
+      tiers[i]=withColumns(tiers[i],columns);
+    }else if(operation.type==='edit-unit'){
+      if(!tiers[i].ids.includes(operation.id))return {error:'模块不在此组合中'};
+      nextUnits=nextUnits.map(u=>tiers[i].ids.includes(u.id)?{...u,config:{...u.config,...operation.sharedPatch,...(u.id===operation.id?operation.patch:{})}}:u);
     }else if(operation.type==='edit'){
       nextUnits=nextUnits.map(u=>tiers[i].ids.includes(u.id)?{...u,config:{...u.config,...operation.patch}}:u);
     }else return {error:'未知层操作'};
   }
   if(tiers.length>30||nextUnits.length>200)return {error:'最多保存 30 层、200 个模块'};
-  const error=validateTiers(tiers,nextUnits)||tiers.flatMap(t=>t.ids).map(id=>configProblem(nextUnits.find(u=>u.id===id).config)).find(Boolean);
+  const error=validateTiers(tiers,nextUnits)||tiers.flatMap(t=>t.ids).map(id=>configProblem(nextUnits.find(u=>u.id===id).config)).find(Boolean)||compositionProblem({tiers},nextUnits);
   return error?{error}:{plan:{...plan,tiers},units:nextUnits};
 }
 

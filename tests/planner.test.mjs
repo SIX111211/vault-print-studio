@@ -5,6 +5,9 @@ import {createContext,runInContext} from 'node:vm';
 import * as stateAPI from '../src/state.js';
 import * as plannerAPI from '../src/planner.js';
 import * as queueAPI from '../src/queue.js';
+import * as drawerLayoutAPI from '../src/drawer-layout.js';
+import * as directoryInputAPI from '../src/directory-input.js';
+import {compositionProblem} from '../src/composition.js';
 import books from '../src/manual-library.json' with {type:'json'};
 import catalog from '../src/catalog.json' with {type:'json'};
 import {buildBOM,defaults,configurationOptions} from '../src/rules.js';
@@ -229,7 +232,7 @@ async function appHarness({pdfFactory}={}){
     }};pdfDocs.push(doc);
     return {promise:Promise.resolve(doc),destroy:()=>doc.destroy()};
   };
-  const context=createContext({books,AbortController,bundledManual:async()=>{throw Error("offline test");},initUpdates(){},workspaceRecovery:()=>({prepare(){},resume(){},invalidate(){}}),...stateAPI,...plannerAPI,...queueAPI,catalog,buildBOM,defaults,configurationOptions,buildScene,buildComposition,componentFrames,Viewer:FakeViewer,crypto,structuredClone,Blob,clearGeometry(){},clearThumbnails(){},scanFiles(){},thumbnail(){return Promise.reject(Error('Invalid geometry'));},moduleThumbnail(){return Promise.resolve({url:'data:image/webp;base64,test',missing:0,unresolved:false});},
+  const context=createContext({books,AbortController,bundledManual:async()=>{throw Error("offline test");},initUpdates(){},workspaceRecovery:()=>({prepare(){},resume(){},invalidate(){}}),...stateAPI,...plannerAPI,...queueAPI,...drawerLayoutAPI,...directoryInputAPI,compositionProblem,catalog,buildBOM,defaults,configurationOptions,buildScene,buildComposition,componentFrames,Viewer:FakeViewer,crypto,structuredClone,Blob,clearGeometry(){},clearThumbnails(){},scanFiles(){},thumbnail(){return Promise.reject(Error('Invalid geometry'));},moduleThumbnail(){return Promise.resolve({url:'data:image/webp;base64,test',missing:0,unresolved:false});},
     getDocument,GlobalWorkerOptions:{},pdfWorkerURL:'/assets/pdf.worker.min.mjs',
     requestAnimationFrame(fn){fn();},document:{getElementById:node,querySelector:node,createElement:tag=>node(tag+'-'+(++canvasId)),querySelectorAll(){return [];},addEventListener(k,fn){listeners[k]=fn;}},window:{devicePixelRatio:3,addEventListener(){}},IntersectionObserver:class{constructor(callback){this.callback=callback;}observe(){}unobserve(){}disconnect(){}},ResizeObserver:class{constructor(callback){this.callback=callback;}observe(){}disconnect(){this.disconnected=true;}},localStorage:{getItem(){return null;},setItem(){}},URL:{createObjectURL(){return 'blob:local-'+(++urlIndex);},revokeObjectURL(url){revoked.push(url);}},setTimeout(fn){const id=++timerId;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);},clearInterval(){}});
   const manualSource=(await readFile(new URL('../src/manual-viewer.js',import.meta.url),'utf8')).replace(/^import .*;\r?\n/gm,'').replace('export class LocalManualViewer','class LocalManualViewer');runInContext(manualSource,context);
@@ -237,6 +240,29 @@ async function appHarness({pdfFactory}={}){
   runInContext(source,context);
   return {node,listeners,revoked,pdfCalls,pdfDocs,pdfRenders,runTimers(){const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn());},run:code=>runInContext(code,context),flush:()=>new Promise(resolve=>setImmediate(resolve))};
 }
+
+test('selected column depth edit updates both sides and retains progress',async()=>{
+ const app=await appHarness();app.run("pickedPattern='SS';pickedHeight='2F';addTier();selectTier(0)");await app.flush();
+ app.run("state.units.find(u=>u.id===selectedPlanUnit).progress.m0010={printed:1}");
+ app.node('plan-selection [name="edit-kind"]').value='drawer';app.node('plan-selection [name="edit-height"]').value='2F';app.node('plan-selection [name="edit-depth"]').value='4';app.node('plan-selection [name="edit-drawers"]').value='2F';
+ app.run('editTier()');await app.flush();
+ assert.equal(app.run("currentPlan().tiers[0].ids.every(id=>state.units.find(u=>u.id===id).config.d==='4')"),true);
+ assert.equal(app.run('state.units.find(u=>u.id===selectedPlanUnit).progress.m0010.printed'),1);
+});
+
+test('clearing models invalidates pending directory reads without restoring stale files',async()=>{
+ const app=await appHarness();app.run('globalThis.readPending=new Promise(resolve=>globalThis.finishRead=resolve);globalThis.importCalls=0;importFiles=async()=>{importCalls++};globalThis.acquiring=acquireModels(()=>readPending)');
+ assert.equal(app.run('directoryBusy'),true);app.node('clear-models').onclick();
+ app.run('finishRead([new Blob(["stale model"])]);');await app.run('acquiring');
+ assert.equal(app.run('importCalls'),0);assert.equal(app.run('directoryBusy'),false);assert.equal(app.run('matches.size'),0);
+});
+
+test('restoring an uneven bridged combination refuses the file before replacing records',async()=>{
+ const app=await appHarness();const a=makeUnit('a','S',3,'1F'),b=makeUnit('b','S',3,'1F'),c=makeUnit('c','S',3,'2F'),l=makeUnit('l','L',3,'1F');
+ const data={version:1,units:[a,b,c,l],plans:[{id:'bad',tiers:[{pattern:'SS',ids:['a','b','c'],columns:[['a','b'],['c']]},tier('l')]}],activeUnit:'a',activePlan:'bad'};
+ const prior=app.run('JSON.stringify(state)');await app.node('restore-project').onchange({target:{files:[new Blob([JSON.stringify(data)])],value:'test.json'}});
+ assert.equal(app.run('JSON.stringify(state)'),prior);
+});
 
 test('app selects layers in place, adds with camera preserved, and only finishes on explicit action',async()=>{
   const app=await appHarness();app.run("showTab('combine')");await app.flush();

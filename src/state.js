@@ -1,4 +1,5 @@
 import {reconcileQueue} from './queue.js';
+import {tierColumns,drawerLayoutProblem} from './drawer-layout.js';
 export const STORAGE_KEY='vault-print-studio-v1';
 export const uid=()=>crypto.randomUUID();
 export const clone=value=>structuredClone(value);
@@ -16,7 +17,7 @@ export function sanitizeState(raw,ids){
   };
   const units=raw.units.map(cleanUnit);
   const unitIds=new Set(units.map(u=>u.id));if(unitIds.size!==units.length)throw Error('模块标识重复');
-  const plans=(Array.isArray(raw.plans)?raw.plans:[]).slice(0,30).map(p=>{if(!p||typeof p.id!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(p.id))throw Error('组合标识无效');if(!Array.isArray(p.tiers)||p.tiers.length>30)throw Error('组合层配置无效');return {id:p.id,name:String(p.name||'组合').slice(0,100),tiers:p.tiers.map(t=>{if(!t||!['single','SS','SM'].includes(t.pattern)||!Array.isArray(t.ids)||t.ids.some(id=>!unitIds.has(id)))throw Error('组合层配置无效');return {pattern:t.pattern,ids:[...t.ids]};})};});
+  const plans=(Array.isArray(raw.plans)?raw.plans:[]).slice(0,30).map(p=>{if(!p||typeof p.id!=='string'||!/^[a-zA-Z0-9_-]{1,100}$/.test(p.id))throw Error('组合标识无效');if(!Array.isArray(p.tiers)||p.tiers.length>30)throw Error('组合层配置无效');return {id:p.id,name:String(p.name||'组合').slice(0,100),tiers:p.tiers.map(t=>{if(!t||!['single','SS','SM'].includes(t.pattern)||!Array.isArray(t.ids)||t.ids.some(id=>!unitIds.has(id)))throw Error('组合层配置无效');if(t.columns!==undefined && (!Array.isArray(t.columns)||t.columns.some(c=>!Array.isArray(c)||c.some(id=>typeof id!=='string'))))throw Error('组合列配置无效');return {pattern:t.pattern,ids:[...t.ids],...(t.columns?{columns:t.columns.map(c=>c.slice())}:{})};})};});
   if(new Set(plans.map(p=>p.id)).size!==plans.length)throw Error('组合标识重复');
   for(const plan of plans){const problem=validateTiers(plan.tiers,units);if(problem)throw Error(problem);}
   const state={version:1,units,activeUnit:unitIds.has(raw.activeUnit)?raw.activeUnit:raw.activeUnit===null?null:units[0]?.id??null,plans,activePlan:plans.some(p=>p.id===raw.activePlan)?raw.activePlan:plans[0]?.id||null,queuePlan:raw.queuePlan===null?null:plans.some(p=>p.id===raw.queuePlan)?raw.queuePlan:undefined,sound:raw.sound===true,printedGhost:raw.printedGhost!==false};
@@ -34,13 +35,19 @@ export function validateTiers(tiers,units){
   const byId=new Map(units.map(u=>[u.id,u])),used=new Set();let prev=null;
   for(let i=0;i<tiers.length;i++){
     const t=tiers[i];if(!t||!['single','SS','SM'].includes(t.pattern)||!Array.isArray(t.ids))return '组合层配置无效';
-    const us=t.ids.map(id=>byId.get(id));if(us.length!==(t.pattern==='single'?1:2)||us.some(u=>!u?.config))return `第 ${i+1} 层尚未放满`;
+    const columns=tierColumns(t),count=t.pattern==='single'?1:2;
+    if(!Array.isArray(columns)||columns.length!==count||columns.some(c=>!Array.isArray(c)||!c.length||c.length>30)||JSON.stringify(columns.flat())!==JSON.stringify(t.ids))return `第 ${i+1} 层的独立列配置无效`;
+    const us=t.ids.map(id=>byId.get(id));if(us.some(u=>!u?.config))return `第 ${i+1} 层尚未放满`;
     if(new Set(t.ids).size!==t.ids.length||us.some(u=>u.config.kind==='mods'||used.has(u.id)))return '改装件不能作为堆叠层，同一模块不能重复放置';us.forEach(u=>used.add(u.id));
     if(us.some(({config:c})=>!['drawer','sustainer'].includes(c.kind)||!['S','M','L','XL'].includes(c.w)||!['3','4','5','6','7'].includes(String(c.d))||!['1F','2F','4F'].includes(c.h)||(c.w==='XL'&&c.h!=='1F')))return '不支持此模块尺寸组合';
-    const cs=us.map(u=>u.config),c=cs[0];if(cs.some(x=>x.kind!==c.kind||x.h!==c.h||String(x.d)!==String(c.d)))return '并排模块须保持相同类型、深度和层高';
-    if(t.pattern==='SS'&&cs.some(x=>x.w!=='S')||t.pattern==='SM'&&(cs[0].w!=='S'||cs[1].w!=='M'))return '并排只支持 S＋S 或 S＋M';
+    const cs=us.map(u=>u.config),c=cs[0];if(cs.some(x=>String(x.d)!==String(c.d)))return '并排模块须保持相同深度';
+    if(cs.some(x=>drawerLayoutProblem(x)))return '框内抽屉配置超出外框容量或规格无效';
+    const widths=columns.map(col=>byId.get(col[0]).config.w);
+    if(columns.some((col,j)=>col.some(id=>byId.get(id).config.w!==widths[j])))return '同一独立列需保持相同宽度';
+    if(t.pattern==='SS'&&widths.some(w=>w!=='S')||t.pattern==='SM'&&(widths[0]!=='S'||widths[1]!=='M'))return '并排只支持 S＋S 或 S＋M';
     const w=t.pattern==='SS'?'L':t.pattern==='SM'?'XL':c.w;
     if(prev&&(w!==prev.w||String(c.d)!==String(prev.d)))return '上下层须同宽同深；支持 L＝S＋S、XL＝S＋M';
-    if(prev?.cs.some(x=>x.kind==='drawer'&&x.roof!=='none'))return '下层抽屉需设为无顶盖才能继续堆叠';prev={w,d:c.d,cs};
+    for(const col of columns)if(col.slice(0,-1).some(id=>byId.get(id).config.kind==='drawer'&&byId.get(id).config.roof!=='none'))return '下层抽屉需设为无顶盖才能继续堆叠';
+    if(prev?.cs.some(x=>x.kind==='drawer'&&x.roof!=='none'))return '下层抽屉需设为无顶盖才能继续堆叠';prev={w,d:c.d,cs:columns.map(col=>byId.get(col.at(-1)).config)};
   }return '';
 }

@@ -1,3 +1,4 @@
+import {restoreDirectoryPaths} from './directory-input.js';
 const DATABASE='vault-print-studio-model-recovery',STORE='workspace',KEY='current';
 function openDatabase(){return new Promise((resolve,reject)=>{
   if(!globalThis.indexedDB){reject(Error('浏览器不支持模型本地保存，当前工作台将保持打开'));return;}
@@ -6,7 +7,7 @@ function openDatabase(){return new Promise((resolve,reject)=>{
   request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
 });}
 export function validCheckpoint(data){
-  return !!data&&data.schema===1&&typeof data.id==='string'&&data.id.length<100&&Array.isArray(data.files)&&data.files.length<=2000&&data.files.every(file=>file instanceof Blob&&typeof file.name==='string')&&Array.isArray(data.manual)&&data.manual.length<=1000&&data.state?.version===1;
+  return !!data&&data.schema===1&&typeof data.id==='string'&&data.id.length<100&&Array.isArray(data.files)&&data.files.length<=2000&&data.files.every(file=>file instanceof Blob&&typeof file.name==='string')&&(data.relativePaths===undefined||(Array.isArray(data.relativePaths)&&data.relativePaths.length===data.files.length&&Array.from(data.relativePaths).every(path=>typeof path==='string'&&path.length<=4096)))&&Array.isArray(data.manual)&&data.manual.length<=1000&&data.state?.version===1;
 }
 export async function saveCheckpoint(data){
   if(!validCheckpoint(data))throw Error('本地恢复数据不完整，已取消更新');
@@ -40,7 +41,7 @@ export function workspaceRecovery({getState,getFiles,getMatches,isImporting,rest
     const manualNow=()=>[...getMatches()].filter(([,m])=>m.manual&&indices.has(m.file)).map(([part,m])=>({id:part,index:indices.get(m.file),quantityByUnit:structuredClone(m.quantityByUnit||{})}));
     const manual=manualNow(),manualSignature=JSON.stringify(manual);
     onProgress(`正在保存 ${files.length} 个本地模型（${Math.ceil(files.reduce((n,f)=>n+f.size,0)/1048576)} MB）与打印记录…`);
-    await persist({schema:1,id,createdAt:new Date().toISOString(),files,manual,state:structuredClone(getState())});
+    await persist({schema:1,id,createdAt:new Date().toISOString(),files,relativePaths:files.map(f=>f.webkitRelativePath||''),manual,state:structuredClone(getState())});
     if(token!==epoch||isImporting())throw Error('保存期间模型目录发生变化，请完成导入后重新更新');
     if(JSON.stringify(manualNow())!==manualSignature)throw Error('保存期间人工匹配或打印份数发生变化，请重新点击更新以保存最新配置');
     // Capture the latest progress, including marks made while the large blobs were saving.
@@ -54,7 +55,7 @@ export function workspaceRecovery({getState,getFiles,getMatches,isImporting,rest
     const token=epoch;
     try{const data=await read(pointer);if(token!==epoch||isImporting()||getMatches().size)return;
       if(!data||data.id!==pointer){notify('没有找到更新恢复数据，打印记录仍保留，请重新选择模型目录');return;}
-      notify(`正在恢复 ${data.files.length} 个本地模型与打印记录…`);await restore(data);
+      notify(`正在恢复 ${data.files.length} 个本地模型与打印记录…`);await restore({...data,files:restoreDirectoryPaths(data.files,data.relativePaths)});
     }catch(error){notify('模型自动恢复暂未完成，打印记录仍保留：'+error.message);}
   }
   return {prepare,resume,invalidate};

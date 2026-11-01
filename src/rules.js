@@ -1,4 +1,5 @@
 import catalog from './catalog.json' with { type: 'json' };
+import {frameRoles,drawerLayoutProblem} from './drawer-layout.js';
 // Quantities count complete STL files. Geometry is never loaded by this module.
 const CATALOG = catalog;
 const byId = Object.fromEntries(catalog.map(item => [item.id, item]));
@@ -270,6 +271,24 @@ function empty(errors=[]){return {rows:[],hardware:[],errors,warnings:[],missing
 export function buildBOM(input={}) {
  if(!input||typeof input!=='object'||Array.isArray(input))return empty(["配置应为对象。"]);
  const c=normalizeConfig(input);
+ if(c.kind==='drawer'&&c.drawers!==undefined){
+  const problem=drawerLayoutProblem(c);if(problem)return empty([problem]);
+  const hostConfig={...c};delete hostConfig.drawers;
+  const host=buildBOM(hostConfig);if(host.errors.length||host.missing.length)return host;
+  const rows=new Map(),hardware=new Map(),warnings=[...host.warnings],missing=[],errors=[];
+  const add=row=>{const old=rows.get(row.id);if(old){old.qty+=row.qty;old.required ||= row.required!==false;}else rows.set(row.id,{...row});};
+  const addHardware=h=>{const key=JSON.stringify([h.spec,h.role]);if(hardware.has(key))hardware.get(key).qty+=h.qty;else hardware.set(key,{...h});};
+  for(const row of host.rows)if(frameRoles.has(row.role))add({...row,reason:'外框共用 · '+row.reason});
+  for(const h of host.hardware)if(h.role!=='facade-fastener')addHardware(h);
+  const drawerSlots=c.drawers.map((h,index)=>{
+   const child=buildBOM({...hostConfig,h,roof:'none',handle:false});errors.push(...child.errors);missing.push(...child.missing);warnings.push(...child.warnings);
+   const childRows=child.rows.filter(r=>!frameRoles.has(r.role));
+   for(const row of childRows)add({...row,reason:`框内第 ${index+1} 个 ${h} 抽屉 · `+row.reason});
+   child.hardware.forEach(addHardware);return {index,h,rows:childRows};
+  });
+  for(const row of rows.values())if(drawerSlots.filter(s=>s.rows.some(r=>r.id===row.id)).length>1)row.reason='多个框内抽屉合计，按完整 STL 文件计份。 '+row.reason;
+  return {rows:[...rows.values()],hardware:[...hardware.values()],errors:[...new Set(errors)],missing:[...new Set(missing)],warnings:[...new Set(warnings)],needsInput:[],complete:!errors.length&&!missing.length,drawerSlots};
+ }
  if(!['drawer','sustainer','mods'].includes(c.kind))return empty(["未知配置类型。"]);
  if(c.kind==='drawer'){
   const errors=[];
