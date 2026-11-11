@@ -123,7 +123,7 @@ export function canPickDirectory(environment = globalThis) {
  * native picking is unavailable. Unexpected picker and ALL read errors reject.
  * environment is injectable for unit tests; it defaults to the browser global.
  */
-export async function pickDirectory({ environment = globalThis } = {}) {
+export async function pickDirectory({ environment = globalThis, onDirectory = () => {} } = {}) {
   const fallback = (reason, message) => ({ status: 'fallback', files: [], reason, message });
   if (!canPickDirectory(environment)) {
     return fallback(environment.isSecureContext === true ? 'unsupported' : 'insecure-context',
@@ -140,5 +140,5 @@ export async function pickDirectory({ environment = globalThis } = {}) {
     }
     throw error;
   }
-  return { status: 'selected', files: await collectDirectoryFiles([directory]) };
+  const files=await collectDirectoryFiles([directory]);onDirectory(directory);return {status:'selected',files};
 }

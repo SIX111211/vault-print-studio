@@ -32,6 +32,25 @@ function normalize(value) {
 
 function pathOf(file) { return String(file.webkitRelativePath || file.name || '').replace(/\\/g, '/'); }
 
+const isDigest = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+function reusableEvidence(entry, file, metadataHint, needsContent) {
+  if (entry?.schema !== 1 || entry.size !== file.size || entry.lastModified !== file.lastModified) return false;
+  if (entry.kind === 'system-metadata') return metadataHint && file.size >= 4;
+  if (!/\.stl$/i.test(file.name)) return entry.kind === 'unsupported-extension';
+  if (entry.kind !== 'stl' || !isDigest(entry.fingerprint) ||
+      !(isDigest(entry.contentSignature) || (!needsContent && entry.contentSignature === null)) ||
+      !['ascii', 'binary'].includes(entry.format)) return false;
+  const g = entry.geometry;
+  if (g === null) return isDigest(entry.contentSignature); // known complete content fast path
+  return g?.format === entry.format && isDigest(g.signature) &&
+    Number.isSafeInteger(g.triangles) && g.triangles > 0 &&
+    (g.format !== 'binary' || 84 + 50 * g.triangles === file.size) &&
+    Number.isFinite(g.surfaceArea) && g.surfaceArea >= 0 &&
+    Array.isArray(g.bbox) && g.bbox.length === 2 &&
+    [0, 1].every(i => Array.isArray(g.bbox[i]) && g.bbox[i].length === 3) &&
+    [0, 1, 2].every(i => Number.isFinite(g.bbox[0][i]) && Number.isFinite(g.bbox[1][i]) && g.bbox[0][i] <= g.bbox[1][i]);
+}
+
 // Every byte participates. Chunk digests keep native WebCrypto fast without
 // allocating an entire large STL. This v1 signature includes size and order.
 export async function contentSignature(file, {signal, onProgress} = {}) {
@@ -213,14 +232,11 @@ async function validateASCII(file, samples) {
   return { format: 'ascii', scope: complete ? 'complete' : 'sampled', triangles: complete ? inspected : null, inspectedTriangles: inspected, bbox: tracker.bbox(), boundsComplete: complete };
 }
 
-async function validateSTL(file, samples) {
-  if (file.size >= 84) {
-    const view = new DataView(samples.head.buffer, samples.head.byteOffset, samples.head.byteLength);
-    const triangles = view.getUint32(80, true);
-    // Binary headers may start with "solid". Exact binary length takes priority.
-    if (84 + triangles * 50 === file.size) return validateBinary(file, samples, triangles);
-  }
-  return validateASCII(file, samples);
+function sampledFormat(size, head) {
+  // Binary headers may start with "solid". Exact binary length takes priority.
+  if (size < 84) return 'ascii';
+  const triangles = new DataView(head.buffer, head.byteOffset, head.byteLength).getUint32(80, true);
+  return 84 + triangles * 50 === size ? 'binary' : 'ascii';
 }
 
 function catalogBounds(record) {
@@ -293,7 +309,7 @@ function geometryCandidates(index, geometry) {
 /**
  * @param {Iterable<File>} files FileList or File[]; directories are metadata only.
  * @param {Array<{id:string,old?:string,name?:string,zh?:string,size?:number,fingerprint?:string,bbox?:number[][],triangles?:number}>} catalog
- * @param {{onProgress?:(event:object)=>void,maxFileBytes?:number,signal?:AbortSignal}} options
+ * @param {{onProgress?:(event:object)=>void,maxFileBytes?:number,signal?:AbortSignal,evidenceCache?:Map}} options
  * @returns {Promise<{matches:Map,unmatched:Array,conflicts:Array,invalid:Array,duplicates:Array,missing:string[]}>}
  *
  * matches values: {file,path,method:'content'|'geometry'|'fingerprint',fingerprint,validation,aliases,duplicateFiles}.
@@ -304,12 +320,28 @@ function geometryCandidates(index, geometry) {
  * missing is every catalog id without an automatic content/geometry match, in catalog order.
  * onProgress({processed,total,fileName,path,status,matched,conflicts,invalid}) runs initially
  * and after every input; callbacks and abort errors propagate. File failures are isolated.
+ * evidenceCache is updated in place. Key: the exact nonempty file.webkitRelativePath
+ * from collectDirectoryFiles (including the root). Scope to one directory handle
+ * and importer/catalog version; after success persist only keys in this scan.
+ * Values: {schema:1,size,lastModified,kind}; kind 'stl' adds fingerprint,
+ * contentSignature (null for geometry-only catalogs), format, and geometry
+ * (analyzeSTLGeometry summary or null on a content match). Other kinds are
+ * 'system-metadata' and 'unsupported-extension'. No File or report is stored.
+ * Size + lastModified are freshness hints. Legacy catalogs and invalid files
+ * are never cached; missing, ambiguous or unstamped paths cannot be reused.
  */
-export async function scanFiles(files, catalog, { onProgress, maxFileBytes = MAX_FILE_BYTES, signal } = {}) {
+export async function scanFiles(files, catalog, { onProgress, maxFileBytes = MAX_FILE_BYTES, signal, evidenceCache } = {}) {
   if (!globalThis.crypto?.subtle) throw new Error('WebCrypto is required; use localhost or HTTPS');
   if (!Number.isSafeInteger(maxFileBytes) || maxFileBytes <= 0) throw new TypeError('maxFileBytes must be a positive safe integer');
   const index = catalogIndex(catalog);
   const inputs = Array.from(files);
+  if (evidenceCache !== undefined && !(evidenceCache instanceof Map)) throw new TypeError('evidenceCache must be a Map');
+  const legacy = !index.byGeometry.size && !index.byContent.size;
+  const uniquePaths = new Map();
+  if (evidenceCache && !legacy) for (const file of inputs) {
+    const key = file?.webkitRelativePath;
+    if (typeof key === 'string' && key) uniquePaths.set(key, !uniquePaths.has(key));
+  }
   const matches = new Map(), unmatched = [], conflicts = [], invalid = [], duplicates = [];
   const seen = new Map(), seenGeometry = new Map();
   let processed = 0, progressError;
@@ -322,6 +354,12 @@ export async function scanFiles(files, catalog, { onProgress, maxFileBytes = MAX
   for (const file of inputs) {
     checkAbort(signal);
     const path = pathOf(file ?? {});
+    const cacheKey = file?.webkitRelativePath;
+    const cacheable = uniquePaths.get(cacheKey) && Number.isSafeInteger(file.lastModified);
+    const stored = cacheable ? evidenceCache.get(cacheKey) : null;
+    // Drop stale/invalid evidence even if the new read fails. Unseen paths belong to the caller.
+    if (cacheKey) evidenceCache?.delete(cacheKey);
+    let evidence;
     let status;
     try {
       if (!file || typeof file.name !== 'string' || typeof file.slice !== 'function' || !Number.isSafeInteger(file.size) || file.size < 0) {
@@ -329,32 +367,40 @@ export async function scanFiles(files, catalog, { onProgress, maxFileBytes = MAX
       }
       if (/\.stl$/i.test(file.name) && file.size > maxFileBytes) throw new FileIssue('file-too-large', `File exceeds the ${maxFileBytes}-byte import limit`);
       const metadataHint = file.name.startsWith('._') || path.split('/').includes('__MACOSX');
-      const prefix = metadataHint && file.size >= 4 ? new Uint8Array(await file.slice(0, 4).arrayBuffer()) : [];
-      const appleMetadata = prefix.length === 4 && prefix[0] === 0 && prefix[1] === 5 && prefix[2] === 22 && (prefix[3] === 7 || prefix[3] === 0);
+      const cached = reusableEvidence(stored, file, metadataHint, index.byContent.size) ? stored : null;
+      const prefix = !cached && metadataHint && file.size >= 4 ? new Uint8Array(await file.slice(0, 4).arrayBuffer()) : [];
+      const appleMetadata = cached ? cached.kind === 'system-metadata' :
+        prefix.length === 4 && prefix[0] === 0 && prefix[1] === 5 && prefix[2] === 22 && (prefix[3] === 7 || prefix[3] === 0);
       if (appleMetadata) {
+        evidence = {kind:'system-metadata'};
         unmatched.push({file, path, reason:'system-metadata'}); status = 'skipped';
       } else if (!/\.stl$/i.test(file.name)) {
+        evidence = {kind:'unsupported-extension'};
         unmatched.push({ file, path, reason: 'unsupported-extension' }); status = 'skipped';
       } else {
-        if (file.size > maxFileBytes) throw new FileIssue('file-too-large', `File exceeds the ${maxFileBytes}-byte import limit`);
         if (!file.size) throw new FileIssue('empty-file', 'File is empty');
-        const samples = await sampleFile(file, signal);
-        const content = index.byContent.size ? await contentSignature(file, {signal,onProgress:fraction=>report(file,'content',{fileProgress:fraction})}) : null;
+        const samples = cached ? null : await sampleFile(file, signal);
+        const fingerprint = cached ? cached.fingerprint : samples.fingerprint;
+        const format = cached?.format ?? sampledFormat(file.size, samples.head);
+        const content = index.byContent.size ? cached?.contentSignature ?? await contentSignature(file, {signal,onProgress:fraction=>report(file,'content',{fileProgress:fraction})}) : null;
+        evidence = {kind:'stl', fingerprint, format, contentSignature:content, geometry:null};
         const contentVersions=content?(index.byContent.get(content)||[]).filter(record=>record.size===file.size):[];
         const reviewVersions=contentVersions.filter(record=>record.variant?.requiresConfirmation);
         const fullKnown = contentVersions.filter(record=>!record.variant?.requiresConfirmation);
-        const legacy = !index.byGeometry.size && !index.byContent.size;
         // A complete byte identity inherits the audited geometry metadata; normal
         // encodings and ASCII case must not reintroduce legacy parser restrictions.
         let validation = fullKnown.length&&catalogBounds(fullKnown[0]) ? {
-          format:file.size>=84&&84+new DataView(samples.head.buffer,samples.head.byteOffset,samples.head.byteLength).getUint32(80,true)*50===file.size?'binary':'ascii',
+          format,
           bbox:catalogBounds(fullKnown[0]),triangles:fullKnown[0].triangles,
           inspectedTriangles:0,boundsComplete:true,scope:'catalog-content-verified'
-        } : legacy ? await validateSTL(file,samples) : null;
-        const { fingerprint } = samples;
+        } : null;
+        if (legacy) validation = format === 'binary'
+          ? await validateBinary(file, samples, (file.size - 84) / 50)
+          : await validateASCII(file, samples);
         const key = content ? `content:${content}` : legacy ? `${file.size}:${fingerprint}` : file;
         const previous = seen.get(key);
         if (previous) {
+          evidence.geometry = previous.geometry ?? null;
           validation = previous.validation;
           previous.files.push(file);
           duplicates.push({ file, path, fingerprint, duplicateOf: { file: previous.file, path: previous.path }, catalogIds: previous.catalogIds.slice(), reason: 'same-fingerprint' });
@@ -379,11 +425,12 @@ export async function scanFiles(files, catalog, { onProgress, maxFileBytes = MAX
           let verified = fullKnown.length ? fullKnown : legacy ? hashed.filter(record => record.size === file.size) : [];
           let geometry = null;
           if (!verified.length && !legacy) {
-            report(file, 'geometry', {fileProgress:0});
-            geometry = await analyzeSTLGeometry(file, {signal, onProgress:p => {
+            if (!cached?.geometry) report(file, 'geometry', {fileProgress:0});
+            geometry = cached?.geometry ?? await analyzeSTLGeometry(file, {signal, onProgress:p => {
               const fraction = typeof p === 'number' ? p : p.fraction ?? (p.totalBytes ? p.bytesRead / p.totalBytes : p.total ? p.processed / p.total : 0);
               report(file, 'geometry', {fileProgress:Math.max(0, Math.min(1, fraction || 0))});
             }});
+            evidence.geometry = geometry;
             validation = {...validation, format:geometry.format, bbox:geometry.bbox,
               triangles:geometry.triangles, inspectedTriangles:geometry.triangles,
               boundsComplete:true, scope:'complete'};
@@ -432,6 +479,7 @@ export async function scanFiles(files, catalog, { onProgress, maxFileBytes = MAX
           }
         }
       }
+      if (cacheable) evidenceCache.set(cacheKey, structuredClone({schema:1, size:file.size, lastModified:file.lastModified, ...evidence}));
     } catch (error) {
       if (error === progressError) throw error;
       checkAbort(signal);
