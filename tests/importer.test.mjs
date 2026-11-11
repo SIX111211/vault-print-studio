@@ -22,8 +22,8 @@ function ascii(triangles = 1) {
   return new TextEncoder().encode(`solid test\n${facet.repeat(triangles)}endsolid test\n`);
 }
 
-function file(bytes, name = 'Part.stl', path = name) {
-  const result = new File([bytes], name);
+function file(bytes, name = 'Part.stl', path = name, options) {
+  const result = new File([bytes], name, options);
   Object.defineProperty(result, 'webkitRelativePath', { value: path });
   return result;
 }
@@ -362,4 +362,84 @@ test('known complete content accepts ignored nonfinite normals and unknown conte
 test('registered but uncertain composite version remains an explicit candidate after renaming or re-export',async()=>{
  const bytes=binary(),different=binary({shift:15,triangles:3}),base=await geometryRecord(bytes,{contentSignature:await contentSignature(file(bytes))}),v=await geometryRecord(different,{contentSignature:await contentSignature(file(different))});base.variants=[{...v,requiresConfirmation:true}];
  for(const header of [0,33]){const altered=different.slice();altered[0]=header;const result=await scanFiles([file(altered,'anything.stl')],[base]);assert.equal(result.matches.size,0);assert.equal(result.conflicts.length,1);assert.deepEqual(result.conflicts[0].candidateIds,['part']);}
+});
+
+function countedFile(bytes, path, lastModified = 100) {
+  const input = file(bytes, path.split('/').at(-1), path, {lastModified});
+  input.reads = 0;
+  const slice = input.slice.bind(input);
+  input.slice = (...args) => { input.reads++; return slice(...args); };
+  return input;
+}
+
+test('persisted per-path evidence rebuilds the cold report with current Files and input order, without reads', async () => {
+  const bytes = binary(), known = await geometryRecord(bytes, {contentSignature:await contentSignature(file(bytes))});
+  const alias = {...known, id:'alias'}, catalog = [known, alias];
+  const changed = binary({shift:10});
+  const fixtures = [
+    [bytes, 'Root/A/Part.stl'], [ascii(), 'Root/B/Part.stl'],
+    [changed, 'Root/C/opaque.stl'], [changed, 'Root/D/Part.stl'],
+    [new Uint8Array([0,5,22,7]), 'Root/__MACOSX/._ignored.stl'],
+    [bytes, 'Root/__MACOSX/._ordinary.pdf'], [bytes, 'Root/E/._actual.stl'],
+  ];
+  const first = fixtures.map(args => countedFile(...args));
+  const cache = new Map();
+  await scanFiles(first, catalog, {evidenceCache:cache});
+  assert.deepEqual([...cache.keys()], fixtures.map(([,path]) => path));
+  assert.ok(first.every(f => f.reads > 0));
+  const restored = structuredClone(cache);
+  // Remove the original unknown file; its former duplicate now produces its own conflict.
+  for (const order of [[1,3,0,4,5,6], [2,3,6,4,0,1]]) {
+    const inputs = order.map(i => countedFile(...fixtures[i]));
+    const cold = await scanFiles(inputs, catalog);
+    inputs.forEach(f => { f.reads = 0; });
+    const warm = await scanFiles(inputs, catalog, {evidenceCache:restored});
+    assert.deepEqual(warm, cold);
+    assert.equal(warm.matches.get('alias').file, inputs[order.indexOf(order[0] === 1 ? 1 : 6)]);
+    assert.ok(inputs.every(f => f.reads === 0));
+  }
+});
+
+test('only a changed size, timestamp or incomplete cache entry triggers a reread', async () => {
+  const bytes = binary(), known = await geometryRecord(bytes, {contentSignature:await contentSignature(file(bytes))});
+  const catalog = [known], cache = new Map();
+  const first = ['A','B','C','D','E'].map(dir => countedFile(bytes, 'Root/' + dir + '/Part.stl'));
+  await scanFiles(first, catalog, {evidenceCache:cache});
+  const inputs = [
+    countedFile(bytes, first[0].webkitRelativePath),
+    countedFile(binary({shift:2}), first[1].webkitRelativePath, 101),
+    countedFile(ascii(), first[2].webkitRelativePath),
+    countedFile(bytes, first[3].webkitRelativePath),
+    countedFile(bytes, first[4].webkitRelativePath),
+  ];
+  cache.set(inputs[3].webkitRelativePath, {size:bytes.length, lastModified:100, id:'part'});
+  cache.get(inputs[4].webkitRelativePath).geometry = {signature:known.geometrySignature};
+  const cold = await scanFiles(inputs, catalog);
+  inputs.forEach(f => { f.reads = 0; });
+  assert.deepEqual(await scanFiles(inputs, catalog, {evidenceCache:cache}), cold);
+  assert.deepEqual(inputs.map(f => f.reads > 0), [false,true,true,true,true]);
+  inputs.forEach(f => { f.reads = 0; });
+  assert.deepEqual(await scanFiles(inputs, catalog, {evidenceCache:cache}), cold);
+  assert.ok(inputs.every(f => f.reads === 0));
+});
+
+test('legacy, invalid, ambiguous and pathless inputs cannot supply reusable identity', async () => {
+  const bytes = binary(), catalog = [await geometryRecord(bytes)], cache = new Map();
+  const path = 'Root/Part.stl', valid = countedFile(bytes, path);
+  await scanFiles([valid], catalog, {evidenceCache:cache});
+  valid.reads = 0;
+  await scanFiles([valid], catalog, {evidenceCache:cache});
+  assert.equal(valid.reads, 0, 'geometry-only catalog can reuse measured geometry');
+  const legacy = await scanFiles([valid], [record(bytes)], {evidenceCache:cache});
+  assert.ok(valid.reads > 0);
+  assert.equal(legacy.matches.get('part').method, 'fingerprint');
+  assert.equal(cache.size, 0);
+  await scanFiles([valid], catalog, {evidenceCache:cache});
+  const bad = countedFile(new Uint8Array(20), path);
+  assert.equal((await scanFiles([bad], catalog, {evidenceCache:cache})).invalid.length, 1);
+  assert.equal(cache.size, 0);
+  const other = countedFile(binary({shift:2}), path), loose = file(bytes, 'Part.stl', '');
+  const mixed = await scanFiles([valid, other, loose], catalog, {evidenceCache:cache});
+  assert.deepEqual(mixed, await scanFiles([valid, other, loose], catalog));
+  assert.equal(cache.size, 0);
 });
